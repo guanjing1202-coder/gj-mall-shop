@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.gj.mall</groupId>
+        <artifactId>gj-mall-server</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>gj-mall-search</artifactId>
+    <name>gj-mall-search</name>
+    <description>搜索模块（暂用 MySQL，后期接 ES）</description>
+    <dependencies>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-framework</artifactId></dependency>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-product</artifactId></dependency>
+    </dependencies>
+</project>

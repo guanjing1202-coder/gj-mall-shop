@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+target/
+unpackage/
+.vite/
+
+# Logs and local runtime files
+logs/
+*.log
+.run.log
+dump.rdb
+
+# IDE and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Environment and local overrides
+.env
+.env.*
+*.local
+
+# Temporary files
+.codex-tmp/
+tmp/
+temp/

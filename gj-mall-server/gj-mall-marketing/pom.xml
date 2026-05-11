@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.gj.mall</groupId>
+        <artifactId>gj-mall-server</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>gj-mall-marketing</artifactId>
+    <name>gj-mall-marketing</name>
+    <description>营销模块：优惠券/秒杀/满减</description>
+    <dependencies>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-framework</artifactId></dependency>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-product</artifactId></dependency>
+        <!--
+          Redisson + Spring Boot 2.7 兼容性说明：
+          redisson-spring-boot-starter 默认内置 redisson-spring-data-32（Spring Boot 3.x）
+          Spring Boot 2.7 需要换用 redisson-spring-data-27
+        -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.redisson</groupId>
+                    <artifactId>redisson-spring-data-32</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-data-27</artifactId>
+        </dependency>
+    </dependencies>
+</project>

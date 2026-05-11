@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.gj.mall</groupId>
+        <artifactId>gj-mall-server</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>gj-mall-admin-api</artifactId>
+    <name>gj-mall-admin-api</name>
+    <description>管理后台 API 聚合层</description>
+    <dependencies>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-framework</artifactId></dependency>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-user</artifactId></dependency>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-product</artifactId></dependency>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-order</artifactId></dependency>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-marketing</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-aop</artifactId></dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,457 @@
+package com.gj.mall.order.service.impl;
+
+import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.StrUtil;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.TypeReference;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.gj.mall.cart.service.CartService;
+import com.gj.mall.cart.vo.CartItemVO;
+import com.gj.mall.cart.vo.CartVO;
+import com.gj.mall.common.enums.ResultCode;
+import com.gj.mall.common.exception.BizException;
+import com.gj.mall.common.result.PageResult;
+import com.gj.mall.order.dto.CreateOrderDTO;
+import com.gj.mall.order.dto.AdminOrderDeliverDTO;
+import com.gj.mall.order.dto.OrderQueryDTO;
+import com.gj.mall.order.entity.OmsOrder;
+import com.gj.mall.order.entity.OmsOrderItem;
+import com.gj.mall.order.enums.OrderStatus;
+import com.gj.mall.order.mapper.OmsOrderItemMapper;
+import com.gj.mall.order.mapper.OmsOrderMapper;
+import com.gj.mall.order.mq.OrderTimeoutProducer;
+import com.gj.mall.order.service.OrderService;
+import com.gj.mall.order.vo.OrderItemVO;
+import com.gj.mall.order.vo.OrderVO;
+import com.gj.mall.order.vo.ReceiverVO;
+import com.gj.mall.order.vo.AdminOrderFulfillmentSummaryVO;
+import com.gj.mall.marketing.entity.SmsSeckillSku;
+import com.gj.mall.marketing.service.CouponService;
+import com.gj.mall.marketing.vo.CouponCheckResult;
+import com.gj.mall.product.entity.PmsSku;
+import com.gj.mall.product.service.SkuService;
+import com.gj.mall.user.entity.UmsUserAddress;
+import com.gj.mall.user.service.UserAddressService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class OrderServiceImpl implements OrderService {
+
+    private final OmsOrderMapper orderMapper;
+    private final OmsOrderItemMapper itemMapper;
+    private final CartService cartService;
+    private final SkuService skuService;
+    private final UserAddressService addressService;
+    private final OrderTimeoutProducer timeoutProducer;
+    private final CouponService couponService;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String create(Long userId, CreateOrderDTO dto) {
+        // 1. 取购物车选中且未失效项
+        CartVO cart = cartService.get(userId);
+        if (cart == null || CollUtil.isEmpty(cart.getItems())) {
+            throw new BizException(ResultCode.ORDER_EMPTY_ITEMS);
+        }
+        List<CartItemVO> selected = cart.getItems().stream()
+                .filter(i -> Integer.valueOf(1).equals(i.getSelected()))
+                .filter(i -> !Boolean.TRUE.equals(i.getInvalid()))
+                .collect(Collectors.toList());
+        if (selected.isEmpty()) {
+            throw new BizException(ResultCode.ORDER_EMPTY_ITEMS, "请先勾选有效商品");
+        }
+
+        // 2. 收货地址快照
+        UmsUserAddress addr = addressService.getOne(userId, dto.getAddressId());
+        ReceiverVO receiver = new ReceiverVO();
+        BeanUtil.copyProperties(addr, receiver);
+
+        // 3. 预扣库存（行级原子 update）
+        List<Long> lockedSkuIds = new ArrayList<>();
+        for (CartItemVO item : selected) {
+            boolean ok = skuService.lockStock(item.getSkuId(), item.getQuantity());
+            if (!ok) {
+                // 回滚已扣的
+                for (Long sid : lockedSkuIds) {
+                    skuService.releaseStock(sid, findQty(selected, sid));
+                }
+                throw new BizException(ResultCode.STOCK_NOT_ENOUGH,
+                        "SKU=" + item.getSkuId() + " 库存不足");
+            }
+            lockedSkuIds.add(item.getSkuId());
+        }
+
+        // 4. 计算金额 + 优惠券
+        BigDecimal totalAmount = selected.stream()
+                .map(i -> i.getPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal freight = BigDecimal.ZERO;       // TODO：运费规则
+        CouponCheckResult couponResult = couponService.check(userId, dto.getCouponId(), totalAmount);
+        BigDecimal coupon  = couponResult.getDiscountAmount();
+        BigDecimal payAmount = totalAmount.add(freight).subtract(coupon);
+        if (payAmount.signum() < 0) payAmount = BigDecimal.ZERO;
+
+        // 5. 落库订单
+        OmsOrder order = new OmsOrder();
+        String orderNo = genOrderNo(userId);
+        order.setOrderNo(orderNo);
+        order.setUserId(userId);
+        order.setTotalAmount(totalAmount);
+        order.setPayAmount(payAmount);
+        order.setFreightAmount(freight);
+        order.setCouponAmount(coupon);
+        order.setStatus(OrderStatus.PENDING_PAY.getCode());
+        order.setReceiverInfo(JSON.toJSONString(receiver));
+        order.setRemark(dto.getRemark());
+        order.setCouponUserId(couponResult.getCouponUserId());  // 可为 null
+        orderMapper.insert(order);
+
+        // 6. 落库订单项
+        for (CartItemVO item : selected) {
+            OmsOrderItem oi = new OmsOrderItem();
+            oi.setOrderId(order.getId());
+            oi.setOrderNo(orderNo);
+            oi.setSpuId(item.getSpuId());
+            oi.setSkuId(item.getSkuId());
+            oi.setSkuName(item.getSkuName());
+            oi.setSkuImage(item.getImage());
+            if (item.getSpecData() != null && !item.getSpecData().isEmpty()) {
+                oi.setSpecData(JSON.toJSONString(item.getSpecData()));
+            }
+            oi.setPrice(item.getPrice());
+            oi.setQuantity(item.getQuantity());
+            oi.setTotalAmount(item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+            itemMapper.insert(oi);
+        }
+
+        // 7. 移除购物车里这些选中项
+        for (CartItemVO item : selected) {
+            try { cartService.remove(userId, item.getSkuId()); } catch (Exception ignored) {}
+        }
+
+        // 8. 发送延迟超时检查
+        try {
+            timeoutProducer.send(order.getId());
+        } catch (Exception e) {
+            log.warn("[order] send timeout MQ failed, orderId={}", order.getId(), e);
+        }
+
+        log.info("[order] created orderNo={} userId={} payAmount={}", orderNo, userId, payAmount);
+        return orderNo;
+    }
+
+    private int findQty(List<CartItemVO> items, Long skuId) {
+        return items.stream().filter(i -> i.getSkuId().equals(skuId))
+                .findFirst().map(CartItemVO::getQuantity).orElse(0);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancel(Long userId, Long orderId) {
+        OmsOrder order = mustOwn(userId, orderId);
+        if (!OrderStatus.PENDING_PAY.getCode().equals(order.getStatus())) {
+            throw new BizException(ResultCode.ORDER_STATUS_ERROR, "仅待付款订单可取消");
+        }
+        doCancel(order);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void timeoutCancel(Long orderId) {
+        OmsOrder order = orderMapper.selectById(orderId);
+        if (order == null) return;
+        if (!OrderStatus.PENDING_PAY.getCode().equals(order.getStatus())) {
+            // 已支付或已取消，跳过
+            return;
+        }
+        log.info("[order] timeout cancel orderId={}", orderId);
+        doCancel(order);
+    }
+
+    private void doCancel(OmsOrder order) {
+        // 释放商品库存
+        List<OmsOrderItem> items = itemMapper.selectList(
+                Wrappers.<OmsOrderItem>lambdaQuery().eq(OmsOrderItem::getOrderId, order.getId()));
+        for (OmsOrderItem it : items) {
+            skuService.releaseStock(it.getSkuId(), it.getQuantity());
+        }
+        // 释放优惠券
+        if (order.getCouponUserId() != null) {
+            couponService.release(order.getCouponUserId());
+        }
+        OmsOrder upd = new OmsOrder();
+        upd.setId(order.getId());
+        upd.setStatus(OrderStatus.CANCELED.getCode());
+        orderMapper.updateById(upd);
+    }
+
+    @Override
+    public PageResult<OrderVO> page(Long userId, OrderQueryDTO q) {
+        Page<OmsOrder> page = new Page<>(safe(q.getPageNum(), 1L), safe(q.getPageSize(), 10L));
+        Page<OmsOrder> result = orderMapper.selectPage(page,
+                Wrappers.<OmsOrder>lambdaQuery()
+                        .eq(OmsOrder::getUserId, userId)
+                        .eq(q.getStatus() != null, OmsOrder::getStatus, q.getStatus())
+                        .orderByDesc(OmsOrder::getId));
+        return toPageVO(result, true);
+    }
+
+    @Override
+    public PageResult<OrderVO> adminPage(OrderQueryDTO q) {
+        Page<OmsOrder> page = new Page<>(safe(q.getPageNum(), 1L), safe(q.getPageSize(), 10L));
+        Page<OmsOrder> result = orderMapper.selectPage(page,
+                Wrappers.<OmsOrder>lambdaQuery()
+                        .eq(q.getUserId() != null, OmsOrder::getUserId, q.getUserId())
+                        .like(StrUtil.isNotBlank(q.getOrderNo()), OmsOrder::getOrderNo, q.getOrderNo())
+                        .like(StrUtil.isNotBlank(q.getDeliveryNo()), OmsOrder::getDeliveryNo, q.getDeliveryNo())
+                        .eq(q.getStatus() != null, OmsOrder::getStatus, q.getStatus())
+                        .orderByDesc(OmsOrder::getId));
+        return toPageVO(result, true);
+    }
+
+    @Override
+    public AdminOrderFulfillmentSummaryVO adminFulfillmentSummary() {
+        AdminOrderFulfillmentSummaryVO summary = orderMapper.selectFulfillmentSummary();
+        if (summary == null) {
+            return new AdminOrderFulfillmentSummaryVO();
+        }
+        return summary;
+    }
+
+    private long safe(Long v, long fallback) {
+        return v == null || v <= 0 ? fallback : v;
+    }
+
+    private PageResult<OrderVO> toPageVO(Page<OmsOrder> page, boolean withItems) {
+        if (CollUtil.isEmpty(page.getRecords())) {
+            return PageResult.empty(page.getCurrent(), page.getSize());
+        }
+        List<Long> orderIds = page.getRecords().stream().map(OmsOrder::getId).collect(Collectors.toList());
+        Map<Long, List<OrderItemVO>> grouped = new HashMap<>();
+        if (withItems) {
+            List<OmsOrderItem> all = itemMapper.selectList(
+                    Wrappers.<OmsOrderItem>lambdaQuery().in(OmsOrderItem::getOrderId, orderIds));
+            for (OmsOrderItem it : all) {
+                grouped.computeIfAbsent(it.getOrderId(), k -> new ArrayList<>()).add(toItemVO(it));
+            }
+        }
+        List<OrderVO> list = page.getRecords().stream()
+                .map(o -> toOrderVO(o, grouped.getOrDefault(o.getId(), Collections.emptyList())))
+                .collect(Collectors.toList());
+        return new PageResult<>(page.getTotal(), page.getCurrent(), page.getSize(), list);
+    }
+
+    @Override
+    public OrderVO detail(Long userId, Long orderId) {
+        OmsOrder order = mustOwn(userId, orderId);
+        return detailVO(order);
+    }
+
+    @Override
+    public OrderVO detailByOrderNo(Long userId, String orderNo) {
+        if (StrUtil.isBlank(orderNo)) {
+            throw new BizException(ResultCode.ORDER_NOT_FOUND);
+        }
+        OmsOrder order = orderMapper.selectOne(Wrappers.<OmsOrder>lambdaQuery()
+                .eq(OmsOrder::getUserId, userId)
+                .eq(OmsOrder::getOrderNo, orderNo)
+                .last("limit 1"));
+        if (order == null) {
+            throw new BizException(ResultCode.ORDER_NOT_FOUND);
+        }
+        return detailVO(order);
+    }
+
+    private OrderVO detailVO(OmsOrder order) {
+        List<OmsOrderItem> items = itemMapper.selectList(
+                Wrappers.<OmsOrderItem>lambdaQuery().eq(OmsOrderItem::getOrderId, order.getId()));
+        List<OrderItemVO> itemVOs = items.stream().map(this::toItemVO).collect(Collectors.toList());
+        return toOrderVO(order, itemVOs);
+    }
+
+    @Override
+    public OmsOrder getByIdOrThrow(Long orderId) {
+        OmsOrder o = orderMapper.selectById(orderId);
+        if (o == null) throw new BizException(ResultCode.ORDER_NOT_FOUND);
+        return o;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void markPaid(Long orderId, Integer payType) {
+        OmsOrder order = getByIdOrThrow(orderId);
+        if (OrderStatus.CANCELED.getCode().equals(order.getStatus())) {
+            throw new BizException(ResultCode.ORDER_CANCELED);
+        }
+        if (!OrderStatus.PENDING_PAY.getCode().equals(order.getStatus())) {
+            // 已经付过，幂等返回
+            return;
+        }
+        // locked_stock -> sale_count
+        List<OmsOrderItem> items = itemMapper.selectList(
+                Wrappers.<OmsOrderItem>lambdaQuery().eq(OmsOrderItem::getOrderId, orderId));
+        for (OmsOrderItem it : items) {
+            skuService.consumeStock(it.getSkuId(), it.getQuantity());
+        }
+        // 核销优惠券
+        if (order.getCouponUserId() != null) {
+            couponService.use(order.getCouponUserId(), orderId);
+        }
+        OmsOrder upd = new OmsOrder();
+        upd.setId(orderId);
+        upd.setStatus(OrderStatus.PENDING_DELIVERY.getCode());
+        upd.setPayType(payType);
+        upd.setPayTime(LocalDateTime.now());
+        orderMapper.updateById(upd);
+        log.info("[order] mark paid orderId={} payType={}", orderId, payType);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OrderVO deliver(Long orderId, AdminOrderDeliverDTO dto) {
+        OmsOrder order = getByIdOrThrow(orderId);
+        if (!OrderStatus.PENDING_DELIVERY.getCode().equals(order.getStatus())) {
+            throw new BizException(ResultCode.ORDER_STATUS_ERROR, "仅待发货订单可发货");
+        }
+        String deliveryCompany = dto == null ? null : StrUtil.trim(dto.getDeliveryCompany());
+        String deliveryNo = dto == null ? null : StrUtil.trim(dto.getDeliveryNo());
+        String deliveryRemark = dto == null ? null : StrUtil.trim(dto.getDeliveryRemark());
+        if (StrUtil.isBlank(deliveryCompany)) {
+            throw new BizException(ResultCode.PARAM_MISSING, "物流公司不能为空");
+        }
+        if (StrUtil.isBlank(deliveryNo)) {
+            throw new BizException(ResultCode.PARAM_MISSING, "物流单号不能为空");
+        }
+        OmsOrder upd = new OmsOrder();
+        upd.setId(orderId);
+        upd.setStatus(OrderStatus.PENDING_RECEIVE.getCode());
+        upd.setDeliveryTime(LocalDateTime.now());
+        upd.setDeliveryCompany(StrUtil.sub(deliveryCompany, 0, 64));
+        upd.setDeliveryNo(StrUtil.sub(deliveryNo, 0, 64));
+        upd.setDeliveryRemark(StrUtil.isBlank(deliveryRemark) ? null : StrUtil.sub(deliveryRemark, 0, 255));
+        orderMapper.updateById(upd);
+        List<OmsOrderItem> items = itemMapper.selectList(
+                Wrappers.<OmsOrderItem>lambdaQuery().eq(OmsOrderItem::getOrderId, orderId));
+        return toOrderVO(orderMapper.selectById(orderId),
+                items.stream().map(this::toItemVO).collect(Collectors.toList()));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void confirmReceive(Long userId, Long orderId) {
+        OmsOrder order = mustOwn(userId, orderId);
+        if (!OrderStatus.PENDING_RECEIVE.getCode().equals(order.getStatus())) {
+            throw new BizException(ResultCode.ORDER_STATUS_ERROR, "仅待收货订单可确认");
+        }
+        OmsOrder upd = new OmsOrder();
+        upd.setId(orderId);
+        upd.setStatus(OrderStatus.COMPLETED.getCode());
+        upd.setReceiveTime(LocalDateTime.now());
+        orderMapper.updateById(upd);
+    }
+
+    private OmsOrder mustOwn(Long userId, Long orderId) {
+        OmsOrder o = orderMapper.selectById(orderId);
+        if (o == null || !o.getUserId().equals(userId)) {
+            throw new BizException(ResultCode.ORDER_NOT_FOUND);
+        }
+        return o;
+    }
+
+    private OrderItemVO toItemVO(OmsOrderItem it) {
+        OrderItemVO vo = new OrderItemVO();
+        BeanUtil.copyProperties(it, vo, "specData");
+        if (StrUtil.isNotBlank(it.getSpecData())) {
+            try {
+                vo.setSpecData(JSON.parseObject(it.getSpecData(),
+                        new TypeReference<Map<String, String>>() {}));
+            } catch (Exception ignored) {}
+        }
+        return vo;
+    }
+
+    private OrderVO toOrderVO(OmsOrder o, List<OrderItemVO> items) {
+        OrderVO vo = new OrderVO();
+        BeanUtil.copyProperties(o, vo, "receiverInfo");
+        OrderStatus st = OrderStatus.of(o.getStatus());
+        vo.setStatusDesc(st == null ? "未知" : st.getDesc());
+        if (StrUtil.isNotBlank(o.getReceiverInfo())) {
+            try {
+                vo.setReceiver(JSON.parseObject(o.getReceiverInfo(), ReceiverVO.class));
+            } catch (Exception ignored) {}
+        }
+        vo.setItems(items);
+        return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String createSeckillOrder(Long userId, SmsSeckillSku seckillSku, Long addressId) {
+        UmsUserAddress addr = addressService.getOne(userId, addressId);
+        ReceiverVO receiver = new ReceiverVO();
+        BeanUtil.copyProperties(addr, receiver);
+
+        BigDecimal totalAmount = seckillSku.getSeckillPrice();
+        BigDecimal payAmount   = totalAmount;  // 秒杀无优惠券
+
+        OmsOrder order = new OmsOrder();
+        String orderNo = genOrderNo(userId);
+        order.setOrderNo(orderNo);
+        order.setUserId(userId);
+        order.setTotalAmount(totalAmount);
+        order.setPayAmount(payAmount);
+        order.setFreightAmount(BigDecimal.ZERO);
+        order.setCouponAmount(BigDecimal.ZERO);
+        order.setStatus(OrderStatus.PENDING_PAY.getCode());
+        order.setReceiverInfo(JSON.toJSONString(receiver));
+        order.setRemark("秒杀活动订单");
+        orderMapper.insert(order);
+
+        // 扣减正式库存（行级 update，防止 Redis 库存与 DB 不一致）
+        PmsSku sku = skuService.getByIdOrThrow(seckillSku.getSkuId());
+        boolean locked = skuService.lockStock(sku.getId(), 1);
+        if (!locked) {
+            throw new BizException(ResultCode.STOCK_NOT_ENOUGH, "商品库存不足");
+        }
+
+        OmsOrderItem item = new OmsOrderItem();
+        item.setOrderId(order.getId());
+        item.setOrderNo(orderNo);
+        item.setSpuId(seckillSku.getSpuId());
+        item.setSkuId(seckillSku.getSkuId());
+        item.setSkuName(sku.getName());
+        item.setSkuImage(sku.getImage());
+        if (sku.getSpecData() != null) item.setSpecData(sku.getSpecData());
+        item.setPrice(seckillSku.getSeckillPrice());
+        item.setQuantity(1);
+        item.setTotalAmount(seckillSku.getSeckillPrice());
+        itemMapper.insert(item);
+
+        try { timeoutProducer.send(order.getId()); } catch (Exception e) {
+            log.warn("[seckill-order] send timeout MQ failed, orderId={}", order.getId(), e);
+        }
+        log.info("[seckill] order created orderNo={} userId={}", orderNo, userId);
+        return orderNo;
+    }
+
+    private String genOrderNo(Long userId) {
+        // 14 位时间 + 4 位用户尾号 + 4 位随机
+        String ts = String.format("%1$tY%1$tm%1$td%1$tH%1$tM%1$tS", new Date());
+        String tail = String.format("%04d", userId == null ? 0 : userId % 10000);
+        String rnd = String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
+        return ts + tail + rnd;
+    }
+}

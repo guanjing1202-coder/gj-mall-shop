@@ -1,0 +1,7 @@
+node_modules
+unpackage
+dist
+*.local
+.idea
+.DS_Store
+*.log

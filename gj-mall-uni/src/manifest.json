@@ -1,0 +1,37 @@
+{
+  "name" : "gj-mall-uni",
+  "appid" : "",
+  "description" : "GJ Mall 移动端 (H5 + 微信小程序)",
+  "versionName" : "1.0.0",
+  "versionCode" : "100",
+  "transformPx" : false,
+  "app-plus" : {
+    "usingComponents" : true,
+    "nvueStyleCompiler" : "uni-app",
+    "compilerVersion" : 3,
+    "splashscreen" : {
+      "alwaysShowBeforeRender" : true,
+      "waiting" : true,
+      "autoclose" : true,
+      "delay" : 0
+    }
+  },
+  "h5" : {
+    "title" : "GJ Mall",
+    "router" : {
+      "mode" : "hash",
+      "base" : "./"
+    }
+  },
+  "mp-weixin" : {
+    "appid" : "wxXXXXXXXXXXXXXXXX",
+    "setting" : {
+      "urlCheck" : false,
+      "es6" : true,
+      "minified" : true
+    },
+    "usingComponents" : true,
+    "permission" : {}
+  },
+  "vueVersion" : "3"
+}

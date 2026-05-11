@@ -1,0 +1,8 @@
+node_modules
+dist
+*.local
+.idea
+.DS_Store
+*.log
+auto-imports.d.ts
+components.d.ts
