@@ -55,6 +55,7 @@ import { ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { getCouponCenter, getMyCoupons, receiveCoupon, type CouponCenterItem, type MyCoupon } from '@/api/coupon'
 import type { ApiId } from '@/api/product'
+import { hasLoginState } from '@/utils/auth'
 
 const tab = ref<'center' | 'mine'>('center')
 const loading = ref(false)
@@ -65,14 +66,16 @@ const myCoupons = ref<MyCoupon[]>([])
 
 onShow(() => {
   loadCoupons()
-  if (uni.getStorageSync('mall_token')) {
+  if (hasLoginState()) {
     loadMyCoupons()
+  } else {
+    myCoupons.value = []
   }
 })
 
 watch(tab, (value) => {
   if (value === 'mine') {
-    if (!uni.getStorageSync('mall_token')) {
+    if (!hasLoginState()) {
       uni.showToast({ title: '请先登录', icon: 'none' })
       uni.switchTab({ url: '/pages/user/user' })
       return
@@ -102,7 +105,7 @@ async function loadMyCoupons() {
 }
 
 async function receive(id: ApiId) {
-  if (!uni.getStorageSync('mall_token')) {
+  if (!hasLoginState()) {
     uni.showToast({ title: '请先登录', icon: 'none' })
     uni.switchTab({ url: '/pages/user/user' })
     return

@@ -14,6 +14,7 @@ import com.gj.mall.common.enums.ResultCode;
 import com.gj.mall.common.exception.BizException;
 import com.gj.mall.common.result.PageResult;
 import com.gj.mall.order.dto.CreateOrderDTO;
+import com.gj.mall.order.dto.CreateOrderItemDTO;
 import com.gj.mall.order.dto.AdminOrderDeliverDTO;
 import com.gj.mall.order.dto.OrderQueryDTO;
 import com.gj.mall.order.entity.OmsOrder;
@@ -24,6 +25,8 @@ import com.gj.mall.order.mapper.OmsOrderMapper;
 import com.gj.mall.order.mq.OrderTimeoutProducer;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.order.vo.OrderItemVO;
+import com.gj.mall.order.vo.OrderLogisticsTraceVO;
+import com.gj.mall.order.vo.OrderLogisticsVO;
 import com.gj.mall.order.vo.OrderVO;
 import com.gj.mall.order.vo.ReceiverVO;
 import com.gj.mall.order.vo.AdminOrderFulfillmentSummaryVO;
@@ -31,6 +34,8 @@ import com.gj.mall.marketing.entity.SmsSeckillSku;
 import com.gj.mall.marketing.service.CouponService;
 import com.gj.mall.marketing.vo.CouponCheckResult;
 import com.gj.mall.product.entity.PmsSku;
+import com.gj.mall.product.entity.PmsSpu;
+import com.gj.mall.product.mapper.PmsSpuMapper;
 import com.gj.mall.product.service.SkuService;
 import com.gj.mall.user.entity.UmsUserAddress;
 import com.gj.mall.user.service.UserAddressService;
@@ -57,19 +62,16 @@ public class OrderServiceImpl implements OrderService {
     private final UserAddressService addressService;
     private final OrderTimeoutProducer timeoutProducer;
     private final CouponService couponService;
+    private final PmsSpuMapper spuMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public String create(Long userId, CreateOrderDTO dto) {
-        // 1. 取购物车选中且未失效项
-        CartVO cart = cartService.get(userId);
-        if (cart == null || CollUtil.isEmpty(cart.getItems())) {
-            throw new BizException(ResultCode.ORDER_EMPTY_ITEMS);
-        }
-        List<CartItemVO> selected = cart.getItems().stream()
-                .filter(i -> Integer.valueOf(1).equals(i.getSelected()))
-                .filter(i -> !Boolean.TRUE.equals(i.getInvalid()))
-                .collect(Collectors.toList());
+        boolean directBuy = CollUtil.isNotEmpty(dto.getItems());
+        // 1. 取购物车选中项，或按直购商品生成结算行
+        List<CartItemVO> selected = directBuy
+                ? buildDirectOrderItems(dto.getItems())
+                : buildCartOrderItems(userId);
         if (selected.isEmpty()) {
             throw new BizException(ResultCode.ORDER_EMPTY_ITEMS, "请先勾选有效商品");
         }
@@ -137,9 +139,11 @@ public class OrderServiceImpl implements OrderService {
             itemMapper.insert(oi);
         }
 
-        // 7. 移除购物车里这些选中项
-        for (CartItemVO item : selected) {
-            try { cartService.remove(userId, item.getSkuId()); } catch (Exception ignored) {}
+        // 7. 购物车下单后移除购物车里的选中项，直购不影响购物车
+        if (!directBuy) {
+            for (CartItemVO item : selected) {
+                try { cartService.remove(userId, item.getSkuId()); } catch (Exception ignored) {}
+            }
         }
 
         // 8. 发送延迟超时检查
@@ -151,6 +155,75 @@ public class OrderServiceImpl implements OrderService {
 
         log.info("[order] created orderNo={} userId={} payAmount={}", orderNo, userId, payAmount);
         return orderNo;
+    }
+
+    private List<CartItemVO> buildCartOrderItems(Long userId) {
+        CartVO cart = cartService.get(userId);
+        if (cart == null || CollUtil.isEmpty(cart.getItems())) {
+            throw new BizException(ResultCode.ORDER_EMPTY_ITEMS);
+        }
+        return cart.getItems().stream()
+                .filter(i -> Integer.valueOf(1).equals(i.getSelected()))
+                .filter(i -> !Boolean.TRUE.equals(i.getInvalid()))
+                .collect(Collectors.toList());
+    }
+
+    private List<CartItemVO> buildDirectOrderItems(List<CreateOrderItemDTO> items) {
+        if (CollUtil.isEmpty(items)) {
+            throw new BizException(ResultCode.ORDER_EMPTY_ITEMS);
+        }
+        List<CreateOrderItemDTO> normalized = items.stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getSkuId() != null)
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(normalized)) {
+            throw new BizException(ResultCode.ORDER_EMPTY_ITEMS);
+        }
+        return normalized.stream().map(this::toDirectCartItem).collect(Collectors.toList());
+    }
+
+    private CartItemVO toDirectCartItem(CreateOrderItemDTO item) {
+        int quantity = item.getQuantity() == null ? 1 : item.getQuantity();
+        if (quantity <= 0) {
+            throw new BizException(ResultCode.PARAM_ERROR, "购买数量必须大于 0");
+        }
+        PmsSku sku = skuService.getByIdOrThrow(item.getSkuId());
+        PmsSpu spu = spuMapper.selectById(sku.getSpuId());
+        if (spu == null) {
+            throw new BizException(ResultCode.PRODUCT_NOT_FOUND);
+        }
+        if (!Integer.valueOf(1).equals(spu.getPublishStatus())) {
+            throw new BizException(ResultCode.PRODUCT_OFF_SHELF);
+        }
+        if (sku.getStock() == null || sku.getStock() < quantity) {
+            throw new BizException(ResultCode.STOCK_NOT_ENOUGH);
+        }
+        CartItemVO line = new CartItemVO();
+        line.setSkuId(sku.getId());
+        line.setSpuId(spu.getId());
+        line.setSpuName(spu.getName());
+        line.setSkuName(sku.getName());
+        line.setImage(StrUtil.isBlank(sku.getImage()) ? spu.getMainImage() : sku.getImage());
+        line.setPrice(sku.getPrice());
+        line.setStock(sku.getStock());
+        line.setPublishStatus(spu.getPublishStatus());
+        line.setInvalid(false);
+        line.setSpecData(parseSpecData(sku.getSpecData()));
+        line.setQuantity(quantity);
+        line.setSelected(1);
+        line.setTotalAmount(sku.getPrice().multiply(BigDecimal.valueOf(quantity)));
+        return line;
+    }
+
+    private Map<String, String> parseSpecData(String specData) {
+        if (StrUtil.isBlank(specData)) {
+            return Collections.emptyMap();
+        }
+        try {
+            return JSON.parseObject(specData, new TypeReference<Map<String, String>>() {});
+        } catch (Exception ignored) {
+            return Collections.emptyMap();
+        }
     }
 
     private int findQty(List<CartItemVO> items, Long skuId) {
@@ -273,6 +346,78 @@ public class OrderServiceImpl implements OrderService {
             throw new BizException(ResultCode.ORDER_NOT_FOUND);
         }
         return detailVO(order);
+    }
+
+    @Override
+    public OrderLogisticsVO logistics(Long userId, Long orderId) {
+        OmsOrder order = mustOwn(userId, orderId);
+        OrderStatus status = OrderStatus.of(order.getStatus());
+        OrderLogisticsVO vo = new OrderLogisticsVO();
+        vo.setOrderId(order.getId());
+        vo.setOrderNo(order.getOrderNo());
+        vo.setStatus(order.getStatus());
+        vo.setStatusDesc(status == null ? "未知" : status.getDesc());
+        vo.setDeliveryCompany(order.getDeliveryCompany());
+        vo.setDeliveryNo(order.getDeliveryNo());
+        vo.setDeliveryRemark(order.getDeliveryRemark());
+        vo.setTraces(buildLogisticsTraces(order));
+        return vo;
+    }
+
+    private List<OrderLogisticsTraceVO> buildLogisticsTraces(OmsOrder order) {
+        Integer status = order.getStatus();
+        boolean canceled = OrderStatus.CANCELED.getCode().equals(status);
+        boolean refunded = OrderStatus.REFUNDED.getCode().equals(status);
+        boolean refunding = OrderStatus.REFUNDING.getCode().equals(status);
+        List<OrderLogisticsTraceVO> traces = new ArrayList<>();
+        traces.add(new OrderLogisticsTraceVO(
+                "订单提交",
+                "订单已创建，等待买家完成支付",
+                order.getCreateTime(),
+                true));
+        traces.add(new OrderLogisticsTraceVO(
+                "支付完成",
+                "支付成功后商家会尽快为你发货",
+                order.getPayTime(),
+                order.getPayTime() != null && !canceled));
+        traces.add(new OrderLogisticsTraceVO(
+                "商家发货",
+                deliveryDescription(order),
+                order.getDeliveryTime(),
+                order.getDeliveryTime() != null && !canceled));
+        traces.add(new OrderLogisticsTraceVO(
+                "确认收货",
+                "商品已签收，交易完成",
+                order.getReceiveTime(),
+                order.getReceiveTime() != null && !canceled));
+        if (canceled) {
+            traces.add(new OrderLogisticsTraceVO("订单取消", "订单已取消，未继续履约", null, true));
+        } else if (refunding || refunded) {
+            traces.add(new OrderLogisticsTraceVO(
+                    refunded ? "退款完成" : "退款处理中",
+                    refunded ? "退款流程已完成" : "售后退款正在处理中",
+                    null,
+                    true));
+        }
+        return traces;
+    }
+
+    private String deliveryDescription(OmsOrder order) {
+        if (StrUtil.isBlank(order.getDeliveryCompany()) && StrUtil.isBlank(order.getDeliveryNo())) {
+            return "商家发货后会展示物流公司和单号";
+        }
+        StringBuilder desc = new StringBuilder();
+        if (StrUtil.isNotBlank(order.getDeliveryCompany())) {
+            desc.append(order.getDeliveryCompany());
+        }
+        if (StrUtil.isNotBlank(order.getDeliveryNo())) {
+            if (desc.length() > 0) desc.append(" ");
+            desc.append(order.getDeliveryNo());
+        }
+        if (StrUtil.isNotBlank(order.getDeliveryRemark())) {
+            desc.append("，").append(order.getDeliveryRemark());
+        }
+        return desc.toString();
     }
 
     private OrderVO detailVO(OmsOrder order) {

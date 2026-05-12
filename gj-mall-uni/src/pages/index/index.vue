@@ -6,12 +6,24 @@
         <text class="title">精选好物</text>
         <text class="subtitle">手机端商城入口，商品、分类和领券都能直接使用。</text>
       </view>
-      <button class="coupon-btn" @tap="goCoupons">领券</button>
+      <view class="hero-actions">
+        <button class="coupon-btn" @tap="goCoupons">领券</button>
+        <button class="seckill-btn" @tap="goSeckill">秒杀</button>
+      </view>
     </view>
 
     <view class="search-card">
       <input v-model="keyword" class="search-input" placeholder="搜索手机、耳机、护肤" confirm-type="search" @confirm="search" />
       <button class="search-btn" @tap="search">搜索</button>
+    </view>
+
+    <view v-if="activeSeckill" class="seckill-card" @tap="goSeckill">
+      <view>
+        <text class="seckill-kicker">限时秒杀</text>
+        <text class="seckill-title">{{ activeSeckill.name }}</text>
+        <text class="seckill-sub">{{ formatTime(activeSeckill.endTime) }} 截止</text>
+      </view>
+      <button>去抢购</button>
     </view>
 
     <view class="section-head">
@@ -40,12 +52,18 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { getProductPage, type ApiId, type ProductItem } from '@/api/product'
+import { getActiveSeckills, type SeckillActivity } from '@/api/seckill'
 
 const loading = ref(false)
+const seckillLoading = ref(false)
 const keyword = ref('')
 const products = ref<ProductItem[]>([])
+const activeSeckill = ref<SeckillActivity>()
 
-onMounted(loadProducts)
+onMounted(() => {
+  loadProducts()
+  loadSeckill()
+})
 
 async function loadProducts() {
   loading.value = true
@@ -62,8 +80,19 @@ async function loadProducts() {
   }
 }
 
+async function loadSeckill() {
+  seckillLoading.value = true
+  try {
+    const res = await getActiveSeckills()
+    activeSeckill.value = (res.data || [])[0]
+  } finally {
+    seckillLoading.value = false
+  }
+}
+
 function search() {
-  loadProducts()
+  const query = keyword.value.trim()
+  uni.navigateTo({ url: `/pages/search/search${query ? `?keyword=${encodeURIComponent(query)}` : ''}` })
 }
 
 function goDetail(id: ApiId) {
@@ -74,8 +103,17 @@ function goCoupons() {
   uni.navigateTo({ url: '/pages/coupon/center' })
 }
 
+function goSeckill() {
+  uni.navigateTo({ url: '/pages/seckill/list' })
+}
+
 function formatPrice(value?: number) {
   return `¥${Number(value || 0).toFixed(0)}`
+}
+
+function formatTime(value?: string) {
+  if (!value) return '活动进行中'
+  return String(value).slice(5, 16).replace('T', ' ')
 }
 
 function normalizeImage(url?: string, seed = 'mall') {
@@ -129,6 +167,7 @@ function normalizeImage(url?: string, seed = 'mall') {
 }
 
 .coupon-btn,
+.seckill-btn,
 .search-btn,
 .section-head button {
   border: 0;
@@ -137,9 +176,26 @@ function normalizeImage(url?: string, seed = 'mall') {
   font-weight: 800;
 }
 
-.coupon-btn {
+.hero-actions {
+  display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.coupon-btn,
+.seckill-btn {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.coupon-btn {
   background: #ffd166;
+  color: #111827;
+}
+
+.seckill-btn {
+  background: #fff;
   color: #111827;
 }
 
@@ -167,6 +223,54 @@ function normalizeImage(url?: string, seed = 'mall') {
   background: #e5484d;
   color: #fff;
   line-height: 76rpx;
+}
+
+.seckill-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 20rpx;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  background: #111827;
+  color: #fff;
+  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.08);
+}
+
+.seckill-card text {
+  display: block;
+}
+
+.seckill-kicker {
+  color: #ffd166;
+  font-size: 23rpx;
+  font-weight: 900;
+}
+
+.seckill-title {
+  margin-top: 8rpx;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.seckill-sub {
+  margin-top: 6rpx;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 23rpx;
+}
+
+.seckill-card button {
+  flex: 0 0 auto;
+  height: 62rpx;
+  margin: 0;
+  padding: 0 24rpx;
+  border-radius: 999rpx;
+  background: #e5484d;
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 62rpx;
 }
 
 .section-head {

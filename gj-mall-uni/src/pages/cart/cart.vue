@@ -72,6 +72,7 @@ import {
   type CartInfo,
   type CartItem,
 } from '@/api/cart'
+import { hasLoginState } from '@/utils/auth'
 
 const emptyCart = (): CartInfo => ({
   items: [],
@@ -90,7 +91,7 @@ const allSelected = computed(() => {
 })
 
 onShow(() => {
-  isLoggedIn.value = Boolean(uni.getStorageSync('mall_token'))
+  isLoggedIn.value = hasLoginState()
   if (isLoggedIn.value) {
     loadCart()
   } else {
@@ -137,7 +138,7 @@ async function clearAll() {
 }
 
 function checkout() {
-  uni.showToast({ title: '移动端结算页待接入，PC 端已可结算', icon: 'none' })
+  uni.navigateTo({ url: '/pages/checkout/checkout' })
 }
 
 function goLogin() {

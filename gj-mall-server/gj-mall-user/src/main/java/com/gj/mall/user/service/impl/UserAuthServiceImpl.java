@@ -100,6 +100,9 @@ public class UserAuthServiceImpl implements UserAuthService {
         Long userId = Long.valueOf(claims.get("uid").toString());
         UmsUser u = userMapper.selectById(userId);
         if (u == null) throw new BizException(ResultCode.USER_NOT_FOUND);
+        if (u.getStatus() != null && u.getStatus() == 0) {
+            throw new BizException(ResultCode.USER_DISABLED);
+        }
         return issueLogin(u);
     }
 

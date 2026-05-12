@@ -61,6 +61,29 @@ export interface ProductDetail extends ProductItem {
   skus?: ProductSku[]
 }
 
+export interface ProductComment {
+  id: ApiId
+  userId?: ApiId
+  spuId: ApiId
+  skuId?: ApiId
+  skuName?: string
+  specData?: Record<string, string>
+  score: number
+  content: string
+  images?: string[]
+  replyContent?: string
+  replyTime?: string
+  createTime?: string
+}
+
+export interface ProductCommentSummary {
+  total: string | number
+  averageScore: number
+  goodCount: string | number
+  goodRate: number
+  imageCount: string | number
+}
+
 export interface BrandItem {
   id: ApiId
   name: string
@@ -87,6 +110,18 @@ export function getProductPage(params: ProductQuery) {
 
 export function getProductDetail(id: ApiId) {
   return request<ProductDetail>({ url: `/api/product/spu/${id}`, method: 'GET' })
+}
+
+export function getProductComments(spuId: ApiId, params: { current?: number; size?: number; hasImage?: boolean }) {
+  return request<PageResult<ProductComment>>({
+    url: `/api/product/comment/spu/${spuId}/page`,
+    method: 'GET',
+    data: params,
+  })
+}
+
+export function getProductCommentSummary(spuId: ApiId) {
+  return request<ProductCommentSummary>({ url: `/api/product/comment/spu/${spuId}/summary`, method: 'GET' })
 }
 
 export function getCategoryTree() {

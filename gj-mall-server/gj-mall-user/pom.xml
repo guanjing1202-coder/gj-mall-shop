@@ -11,5 +11,6 @@
     <description>用户中心模块</description>
     <dependencies>
         <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-framework</artifactId></dependency>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-product</artifactId></dependency>
     </dependencies>
 </project>

@@ -6,6 +6,7 @@ import com.gj.mall.framework.context.UserContext;
 import com.gj.mall.order.dto.CreateOrderDTO;
 import com.gj.mall.order.dto.OrderQueryDTO;
 import com.gj.mall.order.service.OrderService;
+import com.gj.mall.order.vo.OrderLogisticsVO;
 import com.gj.mall.order.vo.OrderVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -22,7 +23,7 @@ public class OrderController {
 
     private final OrderService orderService;
 
-    @Operation(summary = "下单（购物车选中项）")
+    @Operation(summary = "下单（购物车选中项或直购商品）")
     @PostMapping
     public Result<String> create(@Valid @RequestBody CreateOrderDTO dto) {
         return Result.success(orderService.create(UserContext.getUserId(), dto));
@@ -38,6 +39,12 @@ public class OrderController {
     @GetMapping("/{id}")
     public Result<OrderVO> detail(@PathVariable Long id) {
         return Result.success(orderService.detail(UserContext.getUserId(), id));
+    }
+
+    @Operation(summary = "订单物流轨迹")
+    @GetMapping("/{id}/logistics")
+    public Result<OrderLogisticsVO> logistics(@PathVariable Long id) {
+        return Result.success(orderService.logistics(UserContext.getUserId(), id));
     }
 
     @Operation(summary = "按订单号查询订单详情")

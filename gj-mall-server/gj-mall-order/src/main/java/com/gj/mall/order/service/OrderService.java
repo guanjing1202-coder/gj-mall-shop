@@ -6,6 +6,7 @@ import com.gj.mall.order.dto.CreateOrderDTO;
 import com.gj.mall.order.dto.OrderQueryDTO;
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.vo.AdminOrderFulfillmentSummaryVO;
+import com.gj.mall.order.vo.OrderLogisticsVO;
 import com.gj.mall.order.vo.OrderVO;
 
 public interface OrderService {
@@ -33,6 +34,9 @@ public interface OrderService {
 
     /** 用户按订单号查看自己的订单详情 */
     OrderVO detailByOrderNo(Long userId, String orderNo);
+
+    /** 用户查看自己的物流轨迹 */
+    OrderLogisticsVO logistics(Long userId, Long orderId);
 
     /** 内部：根据订单号 / ID 拿主表（不带 items），跨模块用 */
     OmsOrder getByIdOrThrow(Long orderId);

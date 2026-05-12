@@ -24,7 +24,10 @@
     <view class="products">
       <view class="toolbar">
         <text>{{ activeCategoryName }}</text>
-        <button @tap="toggleSort">{{ sortText }}</button>
+        <view class="toolbar-actions">
+          <button @tap="goSearch">筛选</button>
+          <button @tap="toggleSort">{{ sortText }}</button>
+        </view>
       </view>
 
       <view v-if="loading" class="empty">加载中...</view>
@@ -98,6 +101,11 @@ function toggleSort() {
   loadProducts()
 }
 
+function goSearch() {
+  const query = activeCategoryId.value ? `?categoryId=${encodeURIComponent(String(activeCategoryId.value))}` : ''
+  uni.navigateTo({ url: `/pages/search/search${query}` })
+}
+
 function goDetail(id: ApiId) {
   uni.navigateTo({ url: `/pages/product/detail?id=${id}` })
 }
@@ -157,6 +165,11 @@ function normalizeImage(url?: string, seed = 'category') {
 .toolbar text {
   font-size: 34rpx;
   font-weight: 900;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 10rpx;
 }
 
 .toolbar button {
