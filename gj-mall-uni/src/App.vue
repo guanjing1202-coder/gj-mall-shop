@@ -13,5 +13,21 @@ onHide(() => {
 </script>
 
 <style>
-/*每个页面公共css */
+page {
+  background: #f7f8f5;
+  color: #111827;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button {
+  border: 0;
+}
+
+button::after {
+  border: 0;
+}
+
+image {
+  display: block;
+}
 </style>

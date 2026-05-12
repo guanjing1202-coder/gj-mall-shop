@@ -3,7 +3,21 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import ShopHeader from '@/components/ShopHeader.vue'
-import { cancelOrder, getOrderDetail, receiveOrder, type OrderDetail, type OrderItem } from '@/api/order'
+import {
+  cancelAfterSale,
+  cancelOrder,
+  createAfterSale,
+  createOrderComment,
+  getOrderAfterSales,
+  getOrderComments,
+  getOrderDetail,
+  receiveOrder,
+  submitAfterSaleReturn,
+  type AfterSale,
+  type OrderComment,
+  type OrderDetail,
+  type OrderItem,
+} from '@/api/order'
 import { createPay, type PayChannel } from '@/api/pay'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
@@ -16,11 +30,52 @@ const cart = useCartStore()
 const loading = ref(false)
 const actionLoading = ref<'pay' | 'cancel' | 'receive' | ''>('')
 const order = ref<OrderDetail>()
+const comments = ref<OrderComment[]>([])
+const afterSales = ref<AfterSale[]>([])
 const payChannel = ref<PayChannel>('mock')
+const commentDialogOpen = ref(false)
+const commenting = ref(false)
+const commentTarget = ref<OrderItem>()
+const commentForm = ref({
+  score: 5,
+  content: '',
+  imagesText: '',
+})
+const afterSaleDialogOpen = ref(false)
+const afterSaleSubmitting = ref(false)
+const afterSaleOperatingId = ref<string | number>('')
+const returnDialogOpen = ref(false)
+const returnSubmitting = ref(false)
+const returnTarget = ref<AfterSale>()
+const afterSaleForm = ref({
+  type: 2,
+  reason: '',
+  description: '',
+  imagesText: '',
+})
+const returnForm = ref({
+  returnCompany: '',
+  returnNo: '',
+})
 
 const canPay = computed(() => Number(order.value?.status) === 0)
 const canCancel = computed(() => Number(order.value?.status) === 0)
 const canReceive = computed(() => Number(order.value?.status) === 2)
+const canComment = computed(() => Number(order.value?.status) === 3)
+const latestAfterSale = computed(() => afterSales.value[0])
+const hasActiveAfterSale = computed(() => {
+  const status = Number(latestAfterSale.value?.status)
+  return [0, 1, 2].includes(status)
+})
+const canApplyAfterSale = computed(() => {
+  const status = Number(order.value?.status)
+  return [1, 2, 3].includes(status) && !hasActiveAfterSale.value
+})
+const commentMap = computed(() => {
+  const map = new Map<string, OrderComment>()
+  comments.value.forEach((item) => map.set(String(item.orderItemId), item))
+  return map
+})
 const activeStep = computed(() => {
   const status = Number(order.value?.status)
   if (status === 0) return 0
@@ -36,6 +91,14 @@ function statusClass(status?: number) {
   if (code === 1 || code === 2) return 'processing'
   if (code === 3) return 'done'
   if (code === 4 || code === 6) return 'closed'
+  return 'neutral'
+}
+
+function afterSaleStatusClass(status?: number) {
+  const code = Number(status)
+  if (code === 0 || code === 1 || code === 2) return 'processing'
+  if (code === 4) return 'done'
+  if (code === 3 || code === 5) return 'closed'
   return 'neutral'
 }
 
@@ -98,9 +161,148 @@ async function loadOrder() {
   try {
     const res = await getOrderDetail(route.params.id as string)
     order.value = res.data
+    if (res.data?.id) {
+      const [commentRes, afterSaleRes] = await Promise.all([
+        getOrderComments(res.data.id),
+        getOrderAfterSales(res.data.id),
+      ])
+      comments.value = commentRes.data || []
+      afterSales.value = afterSaleRes.data || []
+    }
     await cart.fetchCart()
   } finally {
     loading.value = false
+  }
+}
+
+function itemComment(item: OrderItem) {
+  return commentMap.value.get(String(item.id))
+}
+
+function openComment(item: OrderItem) {
+  commentTarget.value = item
+  commentForm.value = {
+    score: 5,
+    content: '',
+    imagesText: '',
+  }
+  commentDialogOpen.value = true
+}
+
+async function submitComment() {
+  if (!order.value || !commentTarget.value) {
+    return
+  }
+  if (!commentForm.value.content.trim()) {
+    ElMessage.warning('请填写评价内容')
+    return
+  }
+  commenting.value = true
+  try {
+    const images = commentForm.value.imagesText
+      .split(/\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+    await createOrderComment(order.value.id, {
+      orderItemId: commentTarget.value.id,
+      score: commentForm.value.score,
+      content: commentForm.value.content.trim(),
+      images,
+    })
+    ElMessage.success('评价已提交，等待审核')
+    commentDialogOpen.value = false
+    await loadOrder()
+  } finally {
+    commenting.value = false
+  }
+}
+
+function openAfterSale() {
+  afterSaleForm.value = {
+    type: Number(order.value?.status) === 1 ? 1 : 2,
+    reason: '',
+    description: '',
+    imagesText: '',
+  }
+  afterSaleDialogOpen.value = true
+}
+
+async function submitAfterSale() {
+  if (!order.value) {
+    return
+  }
+  if (!afterSaleForm.value.reason.trim()) {
+    ElMessage.warning('请填写售后原因')
+    return
+  }
+  afterSaleSubmitting.value = true
+  try {
+    const images = afterSaleForm.value.imagesText
+      .split(/\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+    await createAfterSale(order.value.id, {
+      type: afterSaleForm.value.type,
+      reason: afterSaleForm.value.reason.trim(),
+      description: afterSaleForm.value.description.trim() || undefined,
+      images,
+    })
+    ElMessage.success('售后申请已提交')
+    afterSaleDialogOpen.value = false
+    await loadOrder()
+  } finally {
+    afterSaleSubmitting.value = false
+  }
+}
+
+async function cancelCurrentAfterSale(item: AfterSale) {
+  try {
+    await ElMessageBox.confirm('确认取消这个售后申请？取消后订单会恢复到申请前状态。', '取消售后', {
+      confirmButtonText: '取消售后',
+      cancelButtonText: '返回',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  afterSaleOperatingId.value = item.id
+  try {
+    await cancelAfterSale(item.id)
+    ElMessage.success('售后申请已取消')
+    await loadOrder()
+  } finally {
+    afterSaleOperatingId.value = ''
+  }
+}
+
+function openReturnDialog(item: AfterSale) {
+  returnTarget.value = item
+  returnForm.value = {
+    returnCompany: item.returnCompany || '',
+    returnNo: item.returnNo || '',
+  }
+  returnDialogOpen.value = true
+}
+
+async function submitReturnInfo() {
+  if (!returnTarget.value) {
+    return
+  }
+  if (!returnForm.value.returnCompany.trim() || !returnForm.value.returnNo.trim()) {
+    ElMessage.warning('请填写退货物流公司和单号')
+    return
+  }
+  returnSubmitting.value = true
+  try {
+    await submitAfterSaleReturn(returnTarget.value.id, {
+      returnCompany: returnForm.value.returnCompany.trim(),
+      returnNo: returnForm.value.returnNo.trim(),
+    })
+    ElMessage.success('退货物流已提交，等待商家确认收货')
+    returnDialogOpen.value = false
+    await loadOrder()
+  } finally {
+    returnSubmitting.value = false
   }
 }
 
@@ -235,7 +437,11 @@ onMounted(loadOrder)
                 <span>{{ specText(item) }}</span>
               </div>
               <div class="item-qty">x{{ item.quantity }}</div>
-              <div class="item-price">{{ formatPrice(item.totalAmount) }}</div>
+              <div class="item-price">
+                <strong>{{ formatPrice(item.totalAmount) }}</strong>
+                <em v-if="itemComment(item)">{{ itemComment(item)?.statusDesc || '已评价' }}</em>
+                <button v-else-if="canComment" type="button" @click="openComment(item)">评价</button>
+              </div>
             </article>
           </section>
 
@@ -277,6 +483,72 @@ onMounted(loadOrder)
                 </div>
               </dl>
             </article>
+          </section>
+
+          <section class="detail-block after-sale-block">
+            <div class="block-heading">
+              <div>
+                <span>Service</span>
+                <h2>售后服务</h2>
+              </div>
+              <button v-if="canApplyAfterSale" class="plain-action" type="button" @click="openAfterSale">申请售后</button>
+            </div>
+
+            <div v-if="afterSales.length" class="after-sale-list">
+              <article v-for="item in afterSales" :key="item.id" class="after-sale-card">
+                <div class="after-sale-card__main">
+                  <div>
+                    <strong>{{ item.typeDesc || '售后申请' }}</strong>
+                    <span>{{ item.afterSaleNo }} · {{ formatTime(item.createTime) }}</span>
+                  </div>
+                  <em :class="afterSaleStatusClass(item.status)">{{ item.statusDesc || '-' }}</em>
+                </div>
+                <dl>
+                  <div>
+                    <dt>退款金额</dt>
+                    <dd>{{ formatPrice(item.amount) }}</dd>
+                  </div>
+                  <div>
+                    <dt>申请原因</dt>
+                    <dd>{{ item.reason || '-' }}</dd>
+                  </div>
+                  <div v-if="item.auditRemark">
+                    <dt>审核备注</dt>
+                    <dd>{{ item.auditRemark }}</dd>
+                  </div>
+                  <div v-if="item.rejectReason">
+                    <dt>拒绝原因</dt>
+                    <dd>{{ item.rejectReason }}</dd>
+                  </div>
+                  <div v-if="item.returnCompany || item.returnNo">
+                    <dt>退货物流</dt>
+                    <dd>{{ item.returnCompany || '-' }} {{ item.returnNo || '' }}</dd>
+                  </div>
+                </dl>
+                <div v-if="[0, 1, 2].includes(Number(item.status))" class="after-sale-actions">
+                  <el-button
+                    v-if="Number(item.status) === 1"
+                    size="small"
+                    type="primary"
+                    @click="openReturnDialog(item)"
+                  >
+                    填写退货物流
+                  </el-button>
+                  <el-button
+                    size="small"
+                    :loading="String(afterSaleOperatingId) === String(item.id)"
+                    @click="cancelCurrentAfterSale(item)"
+                  >
+                    取消申请
+                  </el-button>
+                </div>
+              </article>
+            </div>
+
+            <div v-else class="after-sale-empty">
+              <strong>暂无售后记录</strong>
+              <span>已付款、待收货或已完成订单可以在这里申请售后。</span>
+            </div>
           </section>
         </div>
 
@@ -336,6 +608,7 @@ onMounted(loadOrder)
             >
               确认收货
             </el-button>
+            <el-button v-if="canApplyAfterSale" size="large" @click="openAfterSale">申请售后</el-button>
             <el-button size="large" @click="router.push('/')">继续逛逛</el-button>
           </div>
         </aside>
@@ -345,6 +618,114 @@ onMounted(loadOrder)
         </el-empty>
       </section>
     </main>
+
+    <el-dialog v-model="commentDialogOpen" title="评价商品" width="520px" class="comment-dialog" append-to-body>
+      <div v-if="commentTarget" class="comment-target">
+        <img
+          :src="normalizeImage(commentTarget.skuImage, String(commentTarget.skuId))"
+          :alt="commentTarget.skuName"
+        />
+        <div>
+          <strong>{{ commentTarget.skuName || '商品' }}</strong>
+          <span>{{ specText(commentTarget) }}</span>
+        </div>
+      </div>
+
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="评分">
+          <el-rate v-model="commentForm.score" />
+        </el-form-item>
+        <el-form-item label="评价内容">
+          <el-input
+            v-model="commentForm.content"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="说说商品体验、包装、物流或使用感受"
+          />
+        </el-form-item>
+        <el-form-item label="图片 URL">
+          <el-input
+            v-model="commentForm.imagesText"
+            type="textarea"
+            :rows="3"
+            placeholder="选填，多张图片可用换行或逗号分隔"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="commentDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="commenting" @click="submitComment">提交评价</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="afterSaleDialogOpen" title="申请售后" width="560px" class="service-dialog" append-to-body>
+      <div v-if="order" class="service-summary">
+        <strong>{{ order.orderNo }}</strong>
+        <span>预计退款 {{ formatPrice(order.payAmount) }}，当前版本支持整单售后。</span>
+      </div>
+
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="售后类型">
+          <el-segmented
+            v-model="afterSaleForm.type"
+            :options="[
+              { label: '仅退款', value: 1 },
+              { label: '退货退款', value: 2 },
+            ]"
+          />
+        </el-form-item>
+        <el-form-item label="售后原因">
+          <el-input v-model="afterSaleForm.reason" maxlength="120" show-word-limit placeholder="例如：商品破损、发错货、不想要了" />
+        </el-form-item>
+        <el-form-item label="问题描述">
+          <el-input
+            v-model="afterSaleForm.description"
+            type="textarea"
+            :rows="4"
+            maxlength="500"
+            show-word-limit
+            placeholder="补充说明商品问题、包装情况或你的诉求"
+          />
+        </el-form-item>
+        <el-form-item label="凭证图片 URL">
+          <el-input
+            v-model="afterSaleForm.imagesText"
+            type="textarea"
+            :rows="3"
+            placeholder="选填，多张图片可用换行或逗号分隔"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="afterSaleDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="afterSaleSubmitting" @click="submitAfterSale">提交申请</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="returnDialogOpen" title="填写退货物流" width="480px" class="service-dialog" append-to-body>
+      <div v-if="returnTarget" class="service-summary">
+        <strong>{{ returnTarget.afterSaleNo }}</strong>
+        <span>提交后售后单将进入待退款状态。</span>
+      </div>
+
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="物流公司">
+          <el-input v-model="returnForm.returnCompany" placeholder="例如：顺丰速运" />
+        </el-form-item>
+        <el-form-item label="物流单号">
+          <el-input v-model="returnForm.returnNo" placeholder="填写退回包裹的物流单号" />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="returnDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="returnSubmitting" @click="submitReturnInfo">提交物流</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -397,6 +778,19 @@ onMounted(loadOrder)
   color: #e5484d;
   cursor: pointer;
   font: inherit;
+  font-weight: 900;
+}
+
+.plain-action {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #111827;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
   font-weight: 900;
 }
 
@@ -484,6 +878,21 @@ onMounted(loadOrder)
   color: #6b7280;
 }
 
+.after-sale-card__main em.processing {
+  background: #e8f3ff;
+  color: #2563eb;
+}
+
+.after-sale-card__main em.done {
+  background: #eef8f2;
+  color: #2f8f67;
+}
+
+.after-sale-card__main em.closed {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
 .status-block :deep(.el-step__title) {
   font-weight: 900;
 }
@@ -535,6 +944,217 @@ onMounted(loadOrder)
   color: #e5484d;
   font-weight: 900;
   text-align: right;
+}
+
+.item-price strong,
+.item-price em,
+.item-price button {
+  display: block;
+}
+
+.item-price em {
+  margin-top: 8px;
+  color: #2f8f67;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.item-price button {
+  margin-top: 8px;
+  margin-left: auto;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: #111827;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.comment-target {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f7f8f5;
+}
+
+.comment-target img {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.comment-target strong,
+.comment-target span {
+  display: block;
+}
+
+.comment-target strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comment-target span {
+  margin-top: 7px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+:global(.comment-dialog.el-dialog) {
+  width: min(520px, calc(100vw - 32px));
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+:global(.comment-dialog .el-dialog__title) {
+  font-weight: 900;
+}
+
+:global(.comment-dialog .el-button--primary) {
+  background: #e5484d;
+  border-color: #e5484d;
+}
+
+.after-sale-block {
+  overflow: hidden;
+}
+
+.after-sale-list {
+  display: grid;
+  gap: 12px;
+}
+
+.after-sale-card {
+  padding: 16px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcf8 100%);
+}
+
+.after-sale-card__main {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.after-sale-card__main strong,
+.after-sale-card__main span {
+  display: block;
+}
+
+.after-sale-card__main span {
+  margin-top: 6px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.after-sale-card__main em {
+  min-width: 72px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.after-sale-card dl {
+  margin: 14px 0 0;
+}
+
+.after-sale-card dl > div {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid rgba(17, 24, 39, 0.06);
+}
+
+.after-sale-card dt,
+.after-sale-card dd {
+  margin: 0;
+}
+
+.after-sale-card dt {
+  color: #6b7280;
+}
+
+.after-sale-card dd {
+  color: #111827;
+  font-weight: 800;
+}
+
+.after-sale-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.after-sale-actions :deep(.el-button) {
+  border-radius: 8px;
+  font-weight: 900;
+}
+
+.after-sale-actions :deep(.el-button--primary) {
+  background: #e5484d;
+  border-color: #e5484d;
+}
+
+.after-sale-empty {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px dashed rgba(17, 24, 39, 0.16);
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+
+.after-sale-empty span {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.service-summary {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 18px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f7f8f5;
+}
+
+.service-summary strong {
+  color: #111827;
+}
+
+.service-summary span {
+  color: #6b7280;
+  font-size: 13px;
+}
+
+:global(.service-dialog.el-dialog) {
+  width: min(560px, calc(100vw - 32px));
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+:global(.service-dialog .el-dialog__title) {
+  font-weight: 900;
+}
+
+:global(.service-dialog .el-button--primary) {
+  background: #e5484d;
+  border-color: #e5484d;
 }
 
 .info-grid {
@@ -639,7 +1259,8 @@ onMounted(loadOrder)
 
   .order-hero,
   .status-heading,
-  .block-heading {
+  .block-heading,
+  .after-sale-card__main {
     align-items: start;
     flex-direction: column;
   }
@@ -662,6 +1283,16 @@ onMounted(loadOrder)
   .detail-block dd,
   .pay-panel dd {
     max-width: 60%;
+  }
+
+  .after-sale-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .after-sale-actions :deep(.el-button) {
+    width: 100%;
+    margin-left: 0;
   }
 }
 </style>

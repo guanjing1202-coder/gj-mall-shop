@@ -2,7 +2,9 @@ package com.gj.mall.marketing.controller;
 
 import com.gj.mall.common.result.Result;
 import com.gj.mall.framework.context.UserContext;
+import com.gj.mall.framework.security.AuthExclude;
 import com.gj.mall.marketing.service.CouponService;
+import com.gj.mall.marketing.vo.CouponCenterVO;
 import com.gj.mall.marketing.vo.MyCouponVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -19,6 +21,13 @@ import java.util.List;
 public class CouponController {
 
     private final CouponService couponService;
+
+    @Operation(summary = "领券中心列表")
+    @AuthExclude
+    @GetMapping("/center")
+    public Result<List<CouponCenterVO>> center() {
+        return Result.success(couponService.centerList());
+    }
 
     @Operation(summary = "领取优惠券")
     @PostMapping("/{couponId}/receive")

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
 import {
@@ -18,6 +19,8 @@ import {
   type AfterSaleQuery,
   type AfterSaleRecord,
 } from '@/api/afterSale'
+
+const route = useRoute()
 
 interface CreateFormState {
   orderId?: ApiId
@@ -101,7 +104,31 @@ const statusOptions = [
   { label: '已取消', value: 5 },
 ]
 
-onMounted(fetchAfterSales)
+onMounted(() => {
+  applyRouteFilters()
+  fetchAfterSales()
+})
+
+function routeValue(name: string) {
+  const value = route.query[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function routeNumber(name: string) {
+  const value = routeValue(name)
+  if (value === undefined || value === '') {
+    return undefined
+  }
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function applyRouteFilters() {
+  filters.keyword = routeValue('keyword') || ''
+  filters.userId = routeValue('userId') || undefined
+  filters.type = routeNumber('type')
+  filters.status = routeNumber('status')
+}
 
 async function fetchAfterSales() {
   loading.value = true

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import type { TableColumnsType } from 'ant-design-vue'
 import {
@@ -14,6 +15,7 @@ import {
   type OrderRecord,
 } from '@/api/order'
 
+const route = useRoute()
 const loading = ref(false)
 const summaryLoading = ref(false)
 const delivering = ref(false)
@@ -78,7 +80,31 @@ const statusMap = computed(() => {
   }, {})
 })
 
-onMounted(fetchOrderData)
+onMounted(() => {
+  applyRouteFilters()
+  fetchOrderData()
+})
+
+function routeValue(name: string) {
+  const value = route.query[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function routeNumber(name: string) {
+  const value = routeValue(name)
+  if (value === undefined || value === '') {
+    return undefined
+  }
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function applyRouteFilters() {
+  filters.status = routeNumber('status')
+  filters.userId = routeValue('userId') || undefined
+  filters.orderNo = routeValue('orderNo') || ''
+  filters.deliveryNo = routeValue('deliveryNo') || ''
+}
 
 async function fetchOrderData() {
   await Promise.all([fetchList(), fetchSummary()])

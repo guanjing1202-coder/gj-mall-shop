@@ -25,9 +25,11 @@ const registerForm = reactive({
 
 const navItems = [
   { label: '首页', path: '/' },
-  { label: '新品', path: '/?tag=new' },
-  { label: '热卖', path: '/?tag=hot' },
-  { label: '品牌馆', path: '/?focus=brands' },
+  { label: '全部商品', path: '/products' },
+  { label: '新品', path: '/products?newStatus=1' },
+  { label: '热卖', path: '/products?sort=sales' },
+  { label: '品牌馆', path: '/products?focus=brands' },
+  { label: '领券', path: '/coupon-center' },
 ]
 
 const activePath = computed(() => route.path)
@@ -102,6 +104,22 @@ function goCoupons() {
   router.push('/coupons')
 }
 
+function goAfterSales() {
+  if (!auth.isLoggedIn) {
+    openLogin('login')
+    return
+  }
+  router.push('/after-sales')
+}
+
+function goProfile() {
+  if (!auth.isLoggedIn) {
+    openLogin('login')
+    return
+  }
+  router.push('/profile')
+}
+
 onMounted(() => {
   window.addEventListener('mall-auth-expired', handleAuthExpired)
   if (auth.isLoggedIn) {
@@ -130,7 +148,7 @@ onBeforeUnmount(() => {
           v-for="item in navItems"
           :key="item.label"
           class="shop-nav__item"
-          :class="{ active: activePath === item.path || (item.path === '/' && activePath === '/') }"
+          :class="{ active: activePath === item.path.split('?')[0] || (item.path === '/' && activePath === '/') }"
           type="button"
           @click="go(item.path)"
         >
@@ -139,7 +157,7 @@ onBeforeUnmount(() => {
       </nav>
 
       <div class="shop-actions">
-        <button class="icon-action" type="button" title="搜索" @click="go('/')">
+        <button class="icon-action" type="button" title="搜索" @click="go('/products')">
           <el-icon aria-hidden="true"><Search /></el-icon>
         </button>
         <button class="icon-action cart-action" type="button" title="购物车" aria-label="购物车" @click="goCart">
@@ -158,9 +176,11 @@ onBeforeUnmount(() => {
           </button>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item @click="goProfile">个人中心</el-dropdown-item>
               <el-dropdown-item @click="goCart">我的购物车</el-dropdown-item>
               <el-dropdown-item @click="goOrders">我的订单</el-dropdown-item>
               <el-dropdown-item @click="goCoupons">我的优惠券</el-dropdown-item>
+              <el-dropdown-item @click="goAfterSales">我的售后</el-dropdown-item>
               <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>

@@ -1,5 +1,13 @@
 import { defineStore } from 'pinia'
-import { getProfile, login, logout, register, type UserProfile } from '@/api/auth'
+import {
+  getProfile,
+  login,
+  logout,
+  register,
+  updateProfile,
+  type UpdateProfilePayload,
+  type UserProfile,
+} from '@/api/auth'
 
 function readStoredUser(): UserProfile | undefined {
   const raw = localStorage.getItem('mall_user')
@@ -67,6 +75,10 @@ export const useAuthStore = defineStore('mall-auth', {
       this.user = res.data
       localStorage.setItem('mall_user', JSON.stringify(res.data))
       return res.data
+    },
+    async updateProfile(payload: UpdateProfilePayload) {
+      await updateProfile(payload)
+      return this.loadProfile()
     },
     async logout() {
       try {

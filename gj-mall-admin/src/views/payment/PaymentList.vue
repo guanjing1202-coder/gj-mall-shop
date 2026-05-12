@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import type { TableColumnsType } from 'ant-design-vue'
 import {
@@ -13,6 +14,7 @@ import {
   type PaymentRecord,
 } from '@/api/payment'
 
+const route = useRoute()
 const loading = ref(false)
 const detailLoading = ref(false)
 const actionId = ref<ApiId>()
@@ -67,7 +69,31 @@ const statusOptions = [
   { label: '已退款', value: 3 },
 ]
 
-onMounted(fetchPayments)
+onMounted(() => {
+  applyRouteFilters()
+  fetchPayments()
+})
+
+function routeValue(name: string) {
+  const value = route.query[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function routeNumber(name: string) {
+  const value = routeValue(name)
+  if (value === undefined || value === '') {
+    return undefined
+  }
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function applyRouteFilters() {
+  filters.keyword = routeValue('keyword') || ''
+  filters.userId = routeValue('userId') || undefined
+  filters.channel = routeNumber('channel')
+  filters.status = routeNumber('status')
+}
 
 async function fetchPayments() {
   loading.value = true

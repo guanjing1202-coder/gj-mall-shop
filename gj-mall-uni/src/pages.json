@@ -29,18 +29,24 @@
       "style": {
         "navigationBarTitleText": "商品详情"
       }
+    },
+    {
+      "path": "pages/coupon/center",
+      "style": {
+        "navigationBarTitleText": "领券中心"
+      }
     }
   ],
   "globalStyle": {
     "navigationBarTextStyle": "white",
     "navigationBarTitleText": "GJ Mall",
-    "navigationBarBackgroundColor": "#2979ff",
-    "backgroundColor": "#F5F5F5"
+    "navigationBarBackgroundColor": "#111827",
+    "backgroundColor": "#f7f8f5"
   },
   "tabBar": {
-    "color": "#7A7E83",
-    "selectedColor": "#2979ff",
-    "borderStyle": "black",
+    "color": "#6b7280",
+    "selectedColor": "#e5484d",
+    "borderStyle": "white",
     "backgroundColor": "#ffffff",
     "list": [
       { "pagePath": "pages/index/index",       "text": "首页" },

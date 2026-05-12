@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import type { TableColumnsType } from 'ant-design-vue'
 import {
@@ -21,6 +22,8 @@ import {
   type InventoryRecord,
   type InventorySummary,
 } from '@/api/inventory'
+
+const route = useRoute()
 
 interface CategoryOption {
   title: string
@@ -140,9 +143,39 @@ const rowSelection = computed(() => ({
 }))
 
 onMounted(async () => {
+  applyRouteFilters()
   await Promise.all([fetchBrands(), fetchCategories()])
   await fetchInventoryData()
 })
+
+function routeValue(name: string) {
+  const value = route.query[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function routeNumber(name: string) {
+  const value = routeValue(name)
+  if (value === undefined || value === '') {
+    return undefined
+  }
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function applyRouteFilters() {
+  filters.keyword = routeValue('keyword') || ''
+  filters.brandId = routeValue('brandId') || undefined
+  filters.categoryId = routeValue('categoryId') || undefined
+  filters.publishStatus = routeNumber('publishStatus')
+  filters.stockStatus = normalizeStockStatus(routeValue('stockStatus'))
+}
+
+function normalizeStockStatus(value?: string | null) {
+  if (value === 'low' || value === 'empty' || value === 'normal' || value === 'locked') {
+    return value
+  }
+  return undefined
+}
 
 async function fetchBrands() {
   const res = await getBrandPage({ pageNum: 1, pageSize: 200 })

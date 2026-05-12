@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { CloseOutlined } from '@ant-design/icons-vue'
 import type { TableColumnsType } from 'ant-design-vue'
@@ -17,6 +18,8 @@ import {
   type CommentActionPayload,
   type CommentRecord,
 } from '@/api/comment'
+
+const route = useRoute()
 
 type ActionMode = 'approve' | 'reject' | 'hide' | 'show'
 
@@ -79,7 +82,34 @@ const statusOptions = [
   { label: '已隐藏', value: 3 },
 ]
 
-onMounted(fetchComments)
+onMounted(() => {
+  applyRouteFilters()
+  fetchComments()
+})
+
+function routeValue(name: string) {
+  const value = route.query[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function routeNumber(name: string) {
+  const value = routeValue(name)
+  if (value === undefined || value === '') {
+    return undefined
+  }
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function applyRouteFilters() {
+  filters.keyword = routeValue('keyword') || ''
+  filters.userId = routeValue('userId') || undefined
+  filters.spuId = routeValue('spuId') || undefined
+  filters.score = routeNumber('score')
+  filters.status = routeNumber('status')
+  filters.hasImage = routeNumber('hasImage')
+  filters.hasReply = routeNumber('hasReply')
+}
 
 async function fetchComments() {
   loading.value = true

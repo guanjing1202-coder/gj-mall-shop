@@ -12,6 +12,7 @@ import com.gj.mall.marketing.mapper.SmsCouponMapper;
 import com.gj.mall.marketing.mapper.SmsCouponUserMapper;
 import com.gj.mall.marketing.service.CouponService;
 import com.gj.mall.marketing.vo.CouponCheckResult;
+import com.gj.mall.marketing.vo.CouponCenterVO;
 import com.gj.mall.marketing.vo.CouponVO;
 import com.gj.mall.marketing.vo.MyCouponVO;
 import lombok.RequiredArgsConstructor;
@@ -119,6 +120,21 @@ public class CouponServiceImpl implements CouponService {
                 })
                 .map(pair -> toMyCouponVO((SmsCouponUser) pair[0], (SmsCoupon) pair[1]))
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<CouponCenterVO> centerList() {
+        LocalDateTime now = LocalDateTime.now();
+        List<SmsCoupon> list = couponMapper.selectList(
+                Wrappers.<SmsCoupon>lambdaQuery()
+                        .eq(SmsCoupon::getStatus, 1)
+                        .le(SmsCoupon::getStartTime, now)
+                        .ge(SmsCoupon::getEndTime, now)
+                        .apply("received_count < total_count")
+                        .orderByAsc(SmsCoupon::getMinAmount)
+                        .orderByDesc(SmsCoupon::getDiscountAmount)
+                        .orderByDesc(SmsCoupon::getId));
+        return list.stream().map(this::toCenterVO).collect(Collectors.toList());
     }
 
     @Override
@@ -257,6 +273,14 @@ public class CouponServiceImpl implements CouponService {
 
     private CouponVO toCouponVO(SmsCoupon c) {
         CouponVO vo = new CouponVO();
+        BeanUtil.copyProperties(c, vo);
+        vo.setTypeDesc(typeDesc(c.getType()));
+        vo.setRemainCount(c.getTotalCount() - c.getReceivedCount());
+        return vo;
+    }
+
+    private CouponCenterVO toCenterVO(SmsCoupon c) {
+        CouponCenterVO vo = new CouponCenterVO();
         BeanUtil.copyProperties(c, vo);
         vo.setTypeDesc(typeDesc(c.getType()));
         vo.setRemainCount(c.getTotalCount() - c.getReceivedCount());

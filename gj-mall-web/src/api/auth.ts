@@ -11,6 +11,14 @@ export interface UserProfile {
   gender?: number
 }
 
+export interface UpdateProfilePayload {
+  nickname?: string
+  avatar?: string
+  phone?: string
+  email?: string
+  gender?: number
+}
+
 export interface LoginPayload {
   account: string
   password: string
@@ -44,4 +52,8 @@ export function logout() {
 
 export function getProfile() {
   return request.get<ApiResult<UserProfile>>('/api/user/me')
+}
+
+export function updateProfile(data: UpdateProfilePayload) {
+  return request.put<ApiResult<void>>('/api/user/me', data)
 }

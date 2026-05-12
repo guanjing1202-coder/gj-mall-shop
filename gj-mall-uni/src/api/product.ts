@@ -1,13 +1,6 @@
-import request from '@/utils/request'
+import { request } from '@/utils/request'
 
 export type ApiId = string | number
-
-export interface ApiResult<T> {
-  code: number
-  message: string
-  data: T
-  timestamp: string | number
-}
 
 export interface PageResult<T> {
   total: string | number
@@ -89,17 +82,17 @@ export interface CategoryItem {
 }
 
 export function getProductPage(params: ProductQuery) {
-  return request.get<ApiResult<PageResult<ProductItem>>>('/api/product/spu/page', { params })
+  return request<PageResult<ProductItem>>({ url: '/api/product/spu/page', method: 'GET', data: params })
 }
 
 export function getProductDetail(id: ApiId) {
-  return request.get<ApiResult<ProductDetail>>(`/api/product/spu/${id}`)
+  return request<ProductDetail>({ url: `/api/product/spu/${id}`, method: 'GET' })
 }
 
 export function getCategoryTree() {
-  return request.get<ApiResult<CategoryItem[]>>('/api/product/category/tree')
+  return request<CategoryItem[]>({ url: '/api/product/category/tree', method: 'GET' })
 }
 
 export function getBrandList() {
-  return request.get<ApiResult<BrandItem[]>>('/api/product/brand')
+  return request<BrandItem[]>({ url: '/api/product/brand', method: 'GET' })
 }

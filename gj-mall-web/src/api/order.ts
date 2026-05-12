@@ -35,6 +35,72 @@ export interface OrderItem {
   totalAmount?: number
 }
 
+export interface OrderComment {
+  id: ApiId
+  orderId: ApiId
+  orderNo: string
+  orderItemId: ApiId
+  spuId: ApiId
+  skuId: ApiId
+  score: number
+  content: string
+  images?: string[]
+  status?: number
+  statusDesc?: string
+  replyContent?: string
+  replyTime?: string
+  createTime?: string
+}
+
+export interface CreateOrderCommentPayload {
+  orderItemId: ApiId
+  score: number
+  content: string
+  images?: string[]
+}
+
+export interface AfterSaleItem extends OrderItem {}
+
+export interface AfterSale {
+  id: ApiId
+  afterSaleNo: string
+  orderId: ApiId
+  orderNo: string
+  userId?: ApiId
+  type: number
+  typeDesc?: string
+  amount?: number
+  reason?: string
+  description?: string
+  images?: string[]
+  orderStatusSnapshot?: number
+  orderStatusSnapshotDesc?: string
+  status: number
+  statusDesc?: string
+  auditRemark?: string
+  rejectReason?: string
+  returnCompany?: string
+  returnNo?: string
+  auditTime?: string
+  receiveTime?: string
+  refundTime?: string
+  createTime?: string
+  updateTime?: string
+  items?: AfterSaleItem[]
+}
+
+export interface CreateAfterSalePayload {
+  type: number
+  reason: string
+  description?: string
+  images?: string[]
+}
+
+export interface SubmitAfterSaleReturnPayload {
+  returnCompany: string
+  returnNo: string
+}
+
 export interface OrderDetail {
   id: ApiId
   orderNo: string
@@ -81,4 +147,32 @@ export function cancelOrder(id: ApiId) {
 
 export function receiveOrder(id: ApiId) {
   return request.post<ApiResult<void>>(`/api/order/${id}/receive`)
+}
+
+export function getOrderComments(orderId: ApiId) {
+  return request.get<ApiResult<OrderComment[]>>(`/api/order/${orderId}/comment`)
+}
+
+export function createOrderComment(orderId: ApiId, data: CreateOrderCommentPayload) {
+  return request.post<ApiResult<void>>(`/api/order/${orderId}/comment`, data)
+}
+
+export function getOrderAfterSales(orderId: ApiId) {
+  return request.get<ApiResult<AfterSale[]>>(`/api/order/${orderId}/after-sale`)
+}
+
+export function createAfterSale(orderId: ApiId, data: CreateAfterSalePayload) {
+  return request.post<ApiResult<AfterSale>>(`/api/order/${orderId}/after-sale`, data)
+}
+
+export function getAfterSalePage(params: OrderQuery) {
+  return request.get<ApiResult<PageResult<AfterSale>>>('/api/after-sale/page', { params })
+}
+
+export function cancelAfterSale(id: ApiId) {
+  return request.post<ApiResult<void>>(`/api/after-sale/${id}/cancel`)
+}
+
+export function submitAfterSaleReturn(id: ApiId, data: SubmitAfterSaleReturnPayload) {
+  return request.post<ApiResult<void>>(`/api/after-sale/${id}/return`, data)
 }

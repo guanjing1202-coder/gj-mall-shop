@@ -34,34 +34,65 @@ const metricCards = computed(() => [
     value: formatMoney(dashboard.value.todayPaidAmount),
     sub: `累计 ${formatMoney(dashboard.value.paidAmountTotal)}`,
     tone: 'revenue',
+    route: { name: 'Payment', query: { status: 1 } },
   },
   {
     label: '今日订单',
     value: formatNumber(dashboard.value.todayOrderCount),
     sub: `总订单 ${formatNumber(dashboard.value.orderTotal)}`,
     tone: 'order',
+    route: { name: 'Order' },
   },
   {
     label: '待发货',
     value: formatNumber(dashboard.value.pendingDeliveryCount),
     sub: `金额 ${formatMoney(dashboard.value.pendingDeliveryAmount)}`,
     tone: 'delivery',
+    route: { name: 'Order', query: { status: 1 } },
   },
   {
     label: '库存预警',
     value: formatNumber(dashboard.value.lowStockSkuCount),
     sub: `无库存 ${formatNumber(dashboard.value.emptyStockSkuCount)}`,
     tone: 'stock',
+    route: { name: 'ProductInventory', query: { stockStatus: 'low' } },
   },
 ])
 
 const pendingCards = computed(() => [
-  { label: '待付款', value: dashboard.value.pendingPayCount, route: 'Order' },
-  { label: '待收货', value: dashboard.value.pendingReceiveCount, route: 'Order' },
-  { label: '售后待处理', value: dashboard.value.pendingAfterSaleCount, route: 'AfterSale' },
-  { label: '待审核评价', value: dashboard.value.pendingCommentCount, route: 'ProductComment' },
-  { label: '有效优惠券', value: dashboard.value.activeCouponCount, route: 'MarketingCoupon' },
-  { label: '进行中秒杀', value: dashboard.value.activeSeckillCount, route: 'MarketingSeckill' },
+  { label: '待付款', value: dashboard.value.pendingPayCount, desc: '催付或取消', route: { name: 'Order', query: { status: 0 } } },
+  { label: '待收货', value: dashboard.value.pendingReceiveCount, desc: '物流跟踪', route: { name: 'Order', query: { status: 2 } } },
+  { label: '售后待审核', value: dashboard.value.pendingAfterSaleCount, desc: '退款/退货处理', route: { name: 'AfterSale', query: { status: 0 } } },
+  { label: '待审核评价', value: dashboard.value.pendingCommentCount, desc: '通过/驳回/回复', route: { name: 'ProductComment', query: { status: 0 } } },
+  { label: '有效优惠券', value: dashboard.value.activeCouponCount, desc: '活动库存', route: { name: 'MarketingCoupon', query: { status: 1 } } },
+  { label: '进行中秒杀', value: dashboard.value.activeSeckillCount, desc: '活动监控', route: { name: 'MarketingSeckill', query: { status: 1 } } },
+])
+
+const workflowCards = computed(() => [
+  {
+    label: '发货队列',
+    value: dashboard.value.pendingDeliveryCount,
+    desc: '处理已付款待发货订单',
+    action: '去发货',
+    tone: 'blue',
+    route: { name: 'Logistics', query: { status: 1 } },
+  },
+  {
+    label: '售后审核',
+    value: dashboard.value.pendingAfterSaleCount,
+    desc: '处理用户退款、退货诉求',
+    action: '去审核',
+    tone: 'orange',
+    route: { name: 'AfterSale', query: { status: 0 } },
+  },
+  {
+    label: '评价运营',
+    value: dashboard.value.pendingCommentCount,
+    desc: '审核评价并补充商家回复',
+    action: '去处理',
+    tone: 'green',
+    route: { name: 'ProductComment', query: { status: 0 } },
+  },
 ])
 
 const maxTrendOrders = computed(() => {
@@ -156,8 +187,16 @@ function statusColor(status?: number) {
   return status === undefined || status === null ? 'default' : map[status] || 'default'
 }
 
-function openModule(name: string) {
-  router.push({ name })
+function openModule(name: string, query?: Record<string, string | number | undefined>) {
+  router.push({ name, query })
+}
+
+function openTarget(target: string | { name: string; query?: Record<string, string | number | undefined> }) {
+  if (typeof target === 'string') {
+    openModule(target)
+    return
+  }
+  openModule(target.name, target.query)
 }
 </script>
 
@@ -165,12 +204,41 @@ function openModule(name: string) {
   <a-spin :spinning="loading">
     <div class="dashboard-page">
       <div class="metric-grid">
-        <div v-for="item in metricCards" :key="item.label" class="metric-card" :class="`tone-${item.tone}`">
+        <button
+          v-for="item in metricCards"
+          :key="item.label"
+          type="button"
+          class="metric-card"
+          :class="`tone-${item.tone}`"
+          @click="openTarget(item.route)"
+        >
           <span>{{ item.label }}</span>
           <strong>{{ item.value }}</strong>
           <em>{{ item.sub }}</em>
-        </div>
+        </button>
       </div>
+
+      <section class="dashboard-panel workflow-panel">
+        <div class="panel-header">
+          <h3>运营工作台</h3>
+          <a-button type="link" @click="fetchDashboard">刷新数据</a-button>
+        </div>
+        <div class="workflow-grid">
+          <button
+            v-for="item in workflowCards"
+            :key="item.label"
+            type="button"
+            class="workflow-card"
+            :class="`workflow-${item.tone}`"
+            @click="openTarget(item.route)"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ formatNumber(item.value) }}</strong>
+            <em>{{ item.desc }}</em>
+            <b>{{ item.action }}</b>
+          </button>
+        </div>
+      </section>
 
       <div class="dashboard-grid">
         <section class="dashboard-panel">
@@ -200,10 +268,11 @@ function openModule(name: string) {
               :key="item.label"
               type="button"
               class="pending-item"
-              @click="openModule(item.route)"
+              @click="openTarget(item.route)"
             >
               <span>{{ item.label }}</span>
               <strong>{{ formatNumber(item.value) }}</strong>
+              <em>{{ item.desc }}</em>
             </button>
           </div>
           <div class="product-strip">
@@ -328,6 +397,15 @@ function openModule(name: string) {
   min-height: 112px;
   padding: 16px;
   border-left: 4px solid #1677ff;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.metric-card:hover {
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
 }
 
 .metric-card span,
@@ -365,6 +443,98 @@ function openModule(name: string) {
 .dashboard-panel {
   min-width: 0;
   padding: 16px;
+}
+
+.workflow-panel {
+  padding-bottom: 18px;
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.workflow-card {
+  position: relative;
+  min-height: 132px;
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.workflow-card::after {
+  position: absolute;
+  right: -24px;
+  bottom: -30px;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: rgba(22, 119, 255, 0.1);
+  content: '';
+}
+
+.workflow-card:hover {
+  border-color: #1677ff;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.workflow-card span,
+.workflow-card em,
+.workflow-card b {
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
+.workflow-card span {
+  color: #595959;
+  font-size: 13px;
+}
+
+.workflow-card strong {
+  display: block;
+  position: relative;
+  z-index: 1;
+  margin: 10px 0 6px;
+  color: #1f1f1f;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.workflow-card em {
+  color: #8c8c8c;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.workflow-card b {
+  margin-top: 14px;
+  color: #1677ff;
+  font-size: 13px;
+}
+
+.workflow-orange::after {
+  background: rgba(250, 140, 22, 0.12);
+}
+
+.workflow-orange b {
+  color: #d46b08;
+}
+
+.workflow-green::after {
+  background: rgba(82, 196, 26, 0.12);
+}
+
+.workflow-green b {
+  color: #389e0d;
 }
 
 .panel-header {
@@ -454,6 +624,14 @@ function openModule(name: string) {
   font-size: 22px;
 }
 
+.pending-item em {
+  display: block;
+  margin-top: 5px;
+  color: #bfbfbf;
+  font-style: normal;
+  font-size: 12px;
+}
+
 .product-strip {
   display: flex;
   flex-wrap: wrap;
@@ -536,14 +714,16 @@ function openModule(name: string) {
   }
 
   .dashboard-grid,
-  .lower-grid {
+  .lower-grid,
+  .workflow-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 720px) {
   .metric-grid,
-  .pending-grid {
+  .pending-grid,
+  .workflow-grid {
     grid-template-columns: 1fr;
   }
 

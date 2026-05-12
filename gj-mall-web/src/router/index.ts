@@ -20,10 +20,22 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '商品详情' },
   },
   {
+    path: '/products',
+    name: 'ProductList',
+    component: () => import('@/views/ProductListView.vue'),
+    meta: { title: '商品列表' },
+  },
+  {
     path: '/cart',
     name: 'Cart',
     component: () => import('@/views/CartView.vue'),
     meta: { title: '购物车' },
+  },
+  {
+    path: '/profile',
+    name: 'Profile',
+    component: () => import('@/views/ProfileView.vue'),
+    meta: { title: '个人中心' },
   },
   {
     path: '/checkout',
@@ -42,6 +54,18 @@ const routes: RouteRecordRaw[] = [
     name: 'CouponList',
     component: () => import('@/views/CouponListView.vue'),
     meta: { title: '我的优惠券' },
+  },
+  {
+    path: '/after-sales',
+    name: 'AfterSaleList',
+    component: () => import('@/views/AfterSaleListView.vue'),
+    meta: { title: '我的售后' },
+  },
+  {
+    path: '/coupon-center',
+    name: 'CouponCenter',
+    component: () => import('@/views/CouponCenterView.vue'),
+    meta: { title: '领券中心' },
   },
   {
     path: '/order/:id',

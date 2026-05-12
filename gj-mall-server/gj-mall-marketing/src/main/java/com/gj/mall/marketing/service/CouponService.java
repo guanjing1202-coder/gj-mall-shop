@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gj.mall.marketing.dto.CouponCreateDTO;
 import com.gj.mall.marketing.entity.SmsCoupon;
 import com.gj.mall.marketing.vo.CouponCheckResult;
+import com.gj.mall.marketing.vo.CouponCenterVO;
 import com.gj.mall.marketing.vo.CouponVO;
 import com.gj.mall.marketing.vo.MyCouponVO;
 
@@ -21,6 +22,9 @@ public interface CouponService {
 
     /** 可用优惠券列表（适用于当前订单金额） */
     List<MyCouponVO> available(Long userId, BigDecimal orderAmount);
+
+    /** 领券中心：上架、有效、仍有余量的优惠券 */
+    List<CouponCenterVO> centerList();
 
     /**
      * 校验并计算折扣（下单时调用）

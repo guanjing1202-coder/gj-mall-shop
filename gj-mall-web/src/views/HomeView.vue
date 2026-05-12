@@ -95,31 +95,24 @@ async function loadProducts() {
   }
 }
 
+function goProducts(overrides: Partial<ProductQuery> = {}) {
+  router.push({
+    path: '/products',
+    query: {
+      keyword: overrides.keyword?.trim() || query.keyword?.trim() || undefined,
+      categoryId: overrides.categoryId || undefined,
+      brandId: overrides.brandId || undefined,
+      newStatus: overrides.newStatus,
+      recommendStatus: overrides.recommendStatus,
+      sort: overrides.sort || query.sort || 'operation',
+    },
+  })
+}
+
 async function loadFilters() {
   const [categoryRes, brandRes] = await Promise.all([getCategoryTree(), getBrandList()])
   categories.value = categoryRes.data || []
   brands.value = brandRes.data || []
-}
-
-function selectCategory(id?: ApiId) {
-  query.categoryId = id
-  query.current = 1
-  loadProducts()
-}
-
-function selectBrand(id?: ApiId) {
-  query.brandId = id
-  query.current = 1
-  loadProducts()
-}
-
-function resetFilters() {
-  query.keyword = ''
-  query.categoryId = undefined
-  query.brandId = undefined
-  query.current = 1
-  query.sort = 'operation'
-  loadProducts()
 }
 
 function goProduct(product: ProductItem) {
@@ -148,10 +141,10 @@ onMounted(async () => {
               clearable
               size="large"
               placeholder="搜索手机、耳机、护肤、运动鞋"
-              @keyup.enter="loadProducts"
+              @keyup.enter="goProducts()"
               @clear="loadProducts"
             />
-            <el-button size="large" type="primary" @click="loadProducts">搜索</el-button>
+            <el-button size="large" type="primary" @click="goProducts()">搜索</el-button>
           </div>
 
           <div class="hero-metrics">
@@ -200,7 +193,7 @@ onMounted(async () => {
             <span>Category</span>
             <h2>按场景快速挑选</h2>
           </div>
-          <button class="text-link" type="button" @click="resetFilters">重置筛选</button>
+          <button class="text-link" type="button" @click="goProducts()">查看全部商品</button>
         </div>
 
         <div class="category-rail">
@@ -208,7 +201,7 @@ onMounted(async () => {
             class="category-chip"
             :class="{ active: !query.categoryId }"
             type="button"
-            @click="selectCategory(undefined)"
+            @click="goProducts()"
           >
             全部
           </button>
@@ -218,11 +211,20 @@ onMounted(async () => {
             class="category-chip"
             :class="{ active: query.categoryId === item.id }"
             type="button"
-            @click="selectCategory(item.id)"
+            @click="goProducts({ categoryId: item.id })"
           >
             {{ item.name }}
           </button>
         </div>
+      </section>
+
+      <section class="content-band coupon-promo">
+        <div>
+          <span>Coupons</span>
+          <h2>先领券，再下单</h2>
+          <p>满减券、新人券会在确认订单时自动参与优惠计算。</p>
+        </div>
+        <el-button size="large" type="primary" @click="router.push('/coupon-center')">去领优惠券</el-button>
       </section>
 
       <section class="content-band product-layout">
@@ -238,7 +240,7 @@ onMounted(async () => {
             class="brand-row"
             :class="{ active: !query.brandId }"
             type="button"
-            @click="selectBrand(undefined)"
+            @click="goProducts()"
           >
             <span class="brand-logo text-logo">ALL</span>
             <strong>全部品牌</strong>
@@ -249,7 +251,7 @@ onMounted(async () => {
             class="brand-row"
             :class="{ active: query.brandId === brand.id }"
             type="button"
-            @click="selectBrand(brand.id)"
+            @click="goProducts({ brandId: brand.id })"
           >
             <img
               class="brand-logo"
@@ -267,7 +269,7 @@ onMounted(async () => {
               <span>Products</span>
               <h2>精选商品</h2>
             </div>
-            <el-segmented v-model="query.sort" :options="sortOptions" @change="loadProducts" />
+            <el-segmented v-model="query.sort" :options="sortOptions" @change="goProducts()" />
           </div>
 
           <div v-loading="loading" class="product-grid">
@@ -655,6 +657,47 @@ main {
   align-items: start;
 }
 
+.coupon-promo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  border: 1px solid rgba(229, 72, 77, 0.16);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(229, 72, 77, 0.1), rgba(255, 255, 255, 0.88));
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.06);
+}
+
+.coupon-promo span {
+  display: inline-flex;
+  margin-bottom: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(229, 72, 77, 0.12);
+  color: #e5484d;
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.coupon-promo h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.coupon-promo p {
+  margin: 10px 0 0;
+  color: #6b7280;
+}
+
+.coupon-promo :deep(.el-button) {
+  border-radius: 12px;
+  background: linear-gradient(135deg, #e5484d, #c92432);
+  border-color: transparent;
+  box-shadow: 0 12px 24px rgba(229, 72, 77, 0.2);
+  font-weight: 900;
+}
+
 .brand-panel {
   position: sticky;
   top: 96px;
@@ -956,6 +999,10 @@ main {
   .toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .coupon-promo {
+    grid-template-columns: 1fr;
   }
 
   .toolbar :deep(.el-segmented) {
