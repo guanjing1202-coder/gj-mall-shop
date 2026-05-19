@@ -111,6 +111,8 @@ public class SpuServiceImpl implements SpuService {
         for (String term : terms) {
             List<Long> categoryIds = relations.get("category:" + term);
             List<Long> brandIds = relations.get("brand:" + term);
+            List<Long> directSpuIds = relations.get("spu:" + term);
+            List<Long> skuSpuIds = relations.get("sku:" + term);
             String normalized = normalizeKeyword(term);
             wrapper.and(w -> {
                 w.like(PmsSpu::getName, term)
@@ -129,6 +131,12 @@ public class SpuServiceImpl implements SpuService {
                 if (CollUtil.isNotEmpty(brandIds)) {
                     w.or().in(PmsSpu::getBrandId, brandIds);
                 }
+                if (CollUtil.isNotEmpty(directSpuIds)) {
+                    w.or().in(PmsSpu::getId, directSpuIds);
+                }
+                if (CollUtil.isNotEmpty(skuSpuIds)) {
+                    w.or().in(PmsSpu::getId, skuSpuIds);
+                }
             });
         }
     }
@@ -139,13 +147,19 @@ public class SpuServiceImpl implements SpuService {
         }
         Map<String, List<Long>> result = new HashMap<>();
         for (String term : terms) {
-            List<Long> categoryIds = categoryMapper.selectList(Wrappers.<PmsCategory>lambdaQuery()
+            LinkedHashSet<Long> categoryIds = categoryMapper.selectList(Wrappers.<PmsCategory>lambdaQuery()
                             .eq(PmsCategory::getShowStatus, 1)
                             .like(PmsCategory::getName, term))
                     .stream()
                     .map(PmsCategory::getId)
-                    .collect(Collectors.toList());
-            result.put("category:" + term, categoryIds);
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            for (String categoryName : canonicalCategoryNames(term)) {
+                categoryMapper.selectList(Wrappers.<PmsCategory>lambdaQuery()
+                                .eq(PmsCategory::getShowStatus, 1)
+                                .like(PmsCategory::getName, categoryName))
+                        .forEach(category -> categoryIds.add(category.getId()));
+            }
+            result.put("category:" + term, expandCategoryIds(categoryIds));
 
             LinkedHashSet<Long> brandIds = brandMapper.selectList(Wrappers.<PmsBrand>lambdaQuery()
                             .eq(PmsBrand::getShowStatus, 1)
@@ -161,6 +175,9 @@ public class SpuServiceImpl implements SpuService {
                         .forEach(brand -> brandIds.add(brand.getId()));
             }
             result.put("brand:" + term, new ArrayList<>(brandIds));
+
+            result.put("spu:" + term, searchDirectSpuIds(term));
+            result.put("sku:" + term, searchSkuSpuIds(term));
         }
         return result;
     }
@@ -188,7 +205,7 @@ public class SpuServiceImpl implements SpuService {
         }
         terms.addAll(knownTerms);
         String remainder = removeKnownWords(compact, knownTerms);
-        if (StrUtil.isNotBlank(remainder)) {
+        if (StrUtil.isNotBlank(remainder) && !isGenericSearchModifier(remainder)) {
             terms.add(remainder);
         }
         if (terms.isEmpty() && StrUtil.isNotBlank(compact)) {
@@ -253,8 +270,12 @@ public class SpuServiceImpl implements SpuService {
                 return Arrays.asList("苹果", "iPhone", "iPad", "Mac", "MacBook", "AirPods", "Apple Watch");
             case "huawei":
                 return Arrays.asList("华为", "Mate", "Pura");
+            case "xiaomi":
+                return Arrays.asList("小米", "米家", "Redmi", "红米");
             case "samsung":
                 return Arrays.asList("三星", "Galaxy");
+            case "oppo":
+                return Collections.singletonList("欧珀");
             case "lenovo":
                 return Arrays.asList("联想", "ThinkPad", "小新");
             case "sony":
@@ -279,6 +300,12 @@ public class SpuServiceImpl implements SpuService {
             case "huawei":
             case "华为":
                 return "Huawei";
+            case "xiaomi":
+            case "mi":
+            case "小米":
+            case "redmi":
+            case "红米":
+                return "小米";
             case "samsung":
             case "三星":
                 return "Samsung";
@@ -312,6 +339,7 @@ public class SpuServiceImpl implements SpuService {
         return Arrays.asList(
                 "apple", "苹果",
                 "huawei", "华为",
+                "xiaomi", "mi", "小米", "redmi", "红米",
                 "samsung", "三星",
                 "oppo",
                 "lenovo", "联想",
@@ -319,6 +347,119 @@ public class SpuServiceImpl implements SpuService {
                 "nike", "耐克",
                 "adidas", "阿迪达斯",
                 "dyson", "戴森"
+        ).contains(normalized);
+    }
+
+    private List<Long> expandCategoryIds(Collection<Long> seedIds) {
+        if (CollUtil.isEmpty(seedIds)) {
+            return Collections.emptyList();
+        }
+        List<PmsCategory> categories = categoryMapper.selectList(Wrappers.<PmsCategory>lambdaQuery()
+                .eq(PmsCategory::getShowStatus, 1));
+        Map<Long, List<PmsCategory>> childrenMap = categories.stream()
+                .filter(category -> category.getParentId() != null)
+                .collect(Collectors.groupingBy(PmsCategory::getParentId));
+        LinkedHashSet<Long> expanded = new LinkedHashSet<>(seedIds);
+        Deque<Long> queue = new ArrayDeque<>(seedIds);
+        while (!queue.isEmpty()) {
+            Long parentId = queue.poll();
+            for (PmsCategory child : childrenMap.getOrDefault(parentId, Collections.emptyList())) {
+                if (expanded.add(child.getId())) {
+                    queue.offer(child.getId());
+                }
+            }
+        }
+        return new ArrayList<>(expanded);
+    }
+
+    private List<Long> searchDirectSpuIds(String term) {
+        if (StrUtil.isBlank(term)) {
+            return Collections.emptyList();
+        }
+        String normalized = normalizeKeyword(term);
+        String like = "%" + normalized + "%";
+        return spuMapper.selectList(Wrappers.<PmsSpu>lambdaQuery()
+                        .and(w -> w.like(PmsSpu::getName, term)
+                                .or()
+                                .like(PmsSpu::getSubTitle, term)
+                                .or()
+                                .apply("REPLACE(REPLACE(LOWER(name), ' ', ''), '-', '') LIKE {0}", like)
+                                .or()
+                                .apply("REPLACE(REPLACE(LOWER(sub_title), ' ', ''), '-', '') LIKE {0}", like))
+                        .last("LIMIT 500"))
+                .stream()
+                .map(PmsSpu::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private List<Long> searchSkuSpuIds(String term) {
+        if (StrUtil.isBlank(term)) {
+            return Collections.emptyList();
+        }
+        String normalized = normalizeKeyword(term);
+        String like = "%" + normalized + "%";
+        return skuMapper.selectList(Wrappers.<PmsSku>lambdaQuery()
+                        .and(w -> w.like(PmsSku::getName, term)
+                                .or()
+                                .like(PmsSku::getSkuCode, term)
+                                .or()
+                                .like(PmsSku::getSpecData, term)
+                                .or()
+                                .apply("REPLACE(REPLACE(LOWER(name), ' ', ''), '-', '') LIKE {0}", like)
+                                .or()
+                                .apply("REPLACE(REPLACE(LOWER(sku_code), ' ', ''), '-', '') LIKE {0}", like)
+                                .or()
+                                .apply("REPLACE(REPLACE(LOWER(spec_data), ' ', ''), '-', '') LIKE {0}", like))
+                        .last("LIMIT 500"))
+                .stream()
+                .map(PmsSku::getSpuId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private List<String> canonicalCategoryNames(String term) {
+        String normalized = normalizeKeyword(term);
+        switch (normalized) {
+            case "phone":
+            case "mobile":
+            case "smartphone":
+            case "智能手机":
+            case "手机":
+                return Collections.singletonList("手机");
+            case "earphone":
+            case "earphones":
+            case "headphone":
+            case "headphones":
+            case "bluetoothheadset":
+            case "蓝牙耳机":
+            case "耳机":
+                return Collections.singletonList("耳机");
+            case "computer":
+            case "pc":
+            case "laptop":
+            case "notebook":
+            case "macbook":
+            case "笔记本":
+            case "笔记本电脑":
+            case "电脑":
+                return Collections.singletonList("电脑");
+            default:
+                return Collections.emptyList();
+        }
+    }
+
+    private boolean isGenericSearchModifier(String value) {
+        String normalized = normalizeKeyword(value);
+        if (StrUtil.isBlank(normalized)) {
+            return true;
+        }
+        return Arrays.asList(
+                "智能", "数码", "商品", "产品", "好物", "精选", "新款", "新品",
+                "热卖", "热销", "正品", "官方", "旗舰", "旗舰店", "限时", "秒杀",
+                "笔记本", "蓝牙", "无线", "高清", "专业", "高端", "便携"
         ).contains(normalized);
     }
 

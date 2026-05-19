@@ -149,7 +149,7 @@ import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { addAddress, getAddressList, type AddressItem, type AddressPayload } from '@/api/address'
 import { createSeckillOrder, getActiveSeckills, getSeckillDetail, type SeckillActivity, type SeckillSku } from '@/api/seckill'
 import type { ApiId } from '@/api/product'
-import { hasLoginState } from '@/utils/auth'
+import { requireSession, syncSession } from '@/utils/session'
 
 const loading = ref(false)
 const detailLoading = ref(false)
@@ -178,7 +178,7 @@ const addressForm = reactive<AddressPayload>({
 const skus = computed(() => currentActivity.value?.skus || [])
 
 onShow(async () => {
-  isLoggedIn.value = hasLoginState()
+  isLoggedIn.value = await syncSession()
   await refresh()
   if (isLoggedIn.value) {
     await loadAddresses()
@@ -285,11 +285,11 @@ async function saveAddress() {
 }
 
 async function buy(item: SeckillSku) {
-  if (!isLoggedIn.value) {
-    uni.showToast({ title: '请先登录', icon: 'none' })
-    goLogin()
+  if (!(await requireSession())) {
+    isLoggedIn.value = false
     return
   }
+  isLoggedIn.value = true
   if (!selectedAddressId.value) {
     uni.showToast({ title: '请选择收货地址', icon: 'none' })
     return

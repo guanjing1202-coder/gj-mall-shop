@@ -18,6 +18,8 @@ import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.entity.UmsUserAddress;
 import com.gj.mall.user.mapper.UmsUserAddressMapper;
 import com.gj.mall.user.mapper.UmsUserMapper;
+import com.gj.mall.user.service.UserBrowseHistoryService;
+import com.gj.mall.user.vo.UserBrowseHistoryVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +35,7 @@ public class AdminMemberServiceImpl implements AdminMemberService {
     private final UmsUserMapper userMapper;
     private final UmsUserAddressMapper addressMapper;
     private final OmsOrderMapper orderMapper;
+    private final UserBrowseHistoryService browseHistoryService;
 
     @Override
     public PageResult<MemberDetailVO> page(MemberQueryDTO query) {
@@ -96,15 +99,23 @@ public class AdminMemberServiceImpl implements AdminMemberService {
         Map<Long, Long> addressCountMap = loadAddressCounts(userIds);
         Map<Long, OrderSummary> orderSummaryMap = loadOrderSummaries(userIds);
         Map<Long, List<UmsUserAddress>> addressMap = withAddresses ? loadAddresses(userIds) : Collections.emptyMap();
+        Map<Long, BrowseHistorySummary> browseHistoryMap = withAddresses
+                ? loadBrowseHistorySummaries(userIds)
+                : Collections.emptyMap();
 
         return users.stream().map(user -> {
             OrderSummary orderSummary = orderSummaryMap.getOrDefault(user.getId(), OrderSummary.empty());
+            BrowseHistorySummary browseHistorySummary = browseHistoryMap.getOrDefault(
+                    user.getId(),
+                    BrowseHistorySummary.empty());
             return MemberDetailVO.from(
                     user,
                     addressCountMap.getOrDefault(user.getId(), 0L),
                     orderSummary.orderCount,
                     orderSummary.paidAmount,
-                    addressMap.getOrDefault(user.getId(), Collections.emptyList()));
+                    addressMap.getOrDefault(user.getId(), Collections.emptyList()),
+                    browseHistorySummary.total,
+                    browseHistorySummary.histories);
         }).collect(Collectors.toList());
     }
 
@@ -156,6 +167,20 @@ public class AdminMemberServiceImpl implements AdminMemberService {
         return map;
     }
 
+    private Map<Long, BrowseHistorySummary> loadBrowseHistorySummaries(List<Long> userIds) {
+        if (CollUtil.isEmpty(userIds)) {
+            return Collections.emptyMap();
+        }
+        Map<Long, BrowseHistorySummary> map = new HashMap<>();
+        for (Long userId : userIds) {
+            PageResult<UserBrowseHistoryVO> result = browseHistoryService.page(userId, 1L, 10L);
+            map.put(userId, new BrowseHistorySummary(
+                    result.getTotal(),
+                    result.getList() == null ? Collections.emptyList() : result.getList()));
+        }
+        return map;
+    }
+
     private Long toLong(Object value) {
         if (value == null) {
             return 0L;
@@ -187,6 +212,20 @@ public class AdminMemberServiceImpl implements AdminMemberService {
 
         private static OrderSummary empty() {
             return new OrderSummary(0L, BigDecimal.ZERO);
+        }
+    }
+
+    private static class BrowseHistorySummary {
+        private final Long total;
+        private final List<UserBrowseHistoryVO> histories;
+
+        private BrowseHistorySummary(Long total, List<UserBrowseHistoryVO> histories) {
+            this.total = total == null ? 0L : total;
+            this.histories = histories == null ? Collections.emptyList() : histories;
+        }
+
+        private static BrowseHistorySummary empty() {
+            return new BrowseHistorySummary(0L, Collections.emptyList());
         }
     }
 }

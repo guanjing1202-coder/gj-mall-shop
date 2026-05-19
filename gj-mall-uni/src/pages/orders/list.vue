@@ -61,7 +61,7 @@
 import { ref } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { getOrderPage, type OrderDetail } from '@/api/order'
-import { hasLoginState } from '@/utils/auth'
+import { syncSession } from '@/utils/session'
 
 const statusTabs = [
   { label: '全部', value: undefined },
@@ -79,13 +79,13 @@ const pageNum = ref(1)
 const total = ref(0)
 const finished = ref(false)
 
-onShow(() => {
-  isLoggedIn.value = hasLoginState()
-  if (isLoggedIn.value) {
-    refresh()
-  } else {
+onShow(async () => {
+  isLoggedIn.value = await syncSession()
+  if (!isLoggedIn.value) {
     orders.value = []
+    return
   }
+  await refresh()
 })
 
 onPullDownRefresh(async () => {

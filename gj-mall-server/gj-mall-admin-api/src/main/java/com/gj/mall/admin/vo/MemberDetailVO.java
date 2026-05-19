@@ -2,12 +2,14 @@ package com.gj.mall.admin.vo;
 
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.entity.UmsUserAddress;
+import com.gj.mall.user.vo.UserBrowseHistoryVO;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 
 @Data
@@ -30,6 +32,8 @@ public class MemberDetailVO {
     private Long orderCount;
     private BigDecimal paidAmount;
     private List<UmsUserAddress> addresses;
+    private Long browseHistoryTotal;
+    private List<UserBrowseHistoryVO> browseHistories;
 
     public static MemberDetailVO from(
             UmsUser user,
@@ -37,6 +41,17 @@ public class MemberDetailVO {
             Long orderCount,
             BigDecimal paidAmount,
             List<UmsUserAddress> addresses) {
+        return from(user, addressCount, orderCount, paidAmount, addresses, 0L, Collections.emptyList());
+    }
+
+    public static MemberDetailVO from(
+            UmsUser user,
+            Long addressCount,
+            Long orderCount,
+            BigDecimal paidAmount,
+            List<UmsUserAddress> addresses,
+            Long browseHistoryTotal,
+            List<UserBrowseHistoryVO> browseHistories) {
         MemberDetailVO vo = new MemberDetailVO();
         vo.setId(user.getId());
         vo.setUsername(user.getUsername());
@@ -55,6 +70,8 @@ public class MemberDetailVO {
         vo.setOrderCount(orderCount);
         vo.setPaidAmount(paidAmount);
         vo.setAddresses(addresses);
+        vo.setBrowseHistoryTotal(browseHistoryTotal);
+        vo.setBrowseHistories(browseHistories);
         return vo;
     }
 }

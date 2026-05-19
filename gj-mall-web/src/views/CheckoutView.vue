@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import ShopHeader from '@/components/ShopHeader.vue'
 import {
   addAddress,
@@ -17,8 +17,10 @@ import { createOrder, getOrderByNo } from '@/api/order'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import type { ApiId } from '@/api/product'
+import { getProductDetail } from '@/api/product'
 import type { CartItem } from '@/api/cart'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const cart = useCartStore()
@@ -33,6 +35,8 @@ const editingAddressId = ref<ApiId>()
 const selectedAddressId = ref<ApiId | ''>('')
 const selectedCouponId = ref<ApiId | ''>('')
 const remark = ref('')
+const directBuyItem = ref<CartItem>()
+const directBuyMode = computed(() => route.query.mode === 'direct' && Boolean(route.query.skuId))
 const addressForm = reactive<AddressPayload>({
   receiver: '',
   phone: '',
@@ -47,6 +51,9 @@ const addresses = ref<AddressItem[]>([])
 const coupons = ref<MyCoupon[]>([])
 
 const selectedItems = computed(() => {
+  if (directBuyMode.value) {
+    return directBuyItem.value && !directBuyItem.value.invalid ? [directBuyItem.value] : []
+  }
   return cart.items.filter((item) => item.selected === 1 && !item.invalid)
 })
 const selectedAddress = computed(() => {
@@ -55,7 +62,12 @@ const selectedAddress = computed(() => {
 const selectedCoupon = computed(() => {
   return coupons.value.find((item) => String(item.couponId) === String(selectedCouponId.value))
 })
-const payableAmount = computed(() => Number(cart.selectedAmount || 0))
+const payableAmount = computed(() => {
+  if (directBuyMode.value) {
+    return selectedItems.value.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0)
+  }
+  return Number(cart.selectedAmount || 0)
+})
 const freightAmount = computed(() => 0)
 const couponDiscount = computed(() => {
   return selectedCoupon.value ? calcCouponDiscount(selectedCoupon.value, payableAmount.value) : 0
@@ -124,6 +136,44 @@ function handleImageError(event: Event, seed: string) {
 function specText(item: CartItem) {
   const values = item.specData ? Object.values(item.specData).filter(Boolean) : []
   return values.length ? values.join(' / ') : item.skuName || '默认规格'
+}
+
+async function loadDirectBuyItem() {
+  const spuId = route.query.spuId as string | undefined
+  const skuId = route.query.skuId as string | undefined
+  if (!spuId || !skuId) {
+    directBuyItem.value = undefined
+    return
+  }
+  const quantity = Math.max(1, Number(route.query.quantity || 1))
+  const res = await getProductDetail(spuId)
+  const detail = res.data
+  const sku = detail.skus?.find((candidate) => String(candidate.id) === String(skuId))
+  if (!sku) {
+    directBuyItem.value = undefined
+    ElMessage.warning('直购商品规格不存在')
+    return
+  }
+  const stock = Number(sku.stock || 0)
+  const safeQuantity = Math.min(quantity, Math.max(1, stock))
+  const price = Number(sku.price || detail.price || 0)
+  directBuyItem.value = {
+    skuId: sku.id,
+    spuId: detail.id,
+    spuName: detail.name,
+    skuName: sku.name || sku.skuCode || detail.name,
+    image: sku.image || detail.mainImage,
+    price,
+    stock,
+    publishStatus: detail.publishStatus,
+    invalid: detail.publishStatus !== 1 || stock <= 0 || quantity > stock,
+    stockEnough: stock >= quantity,
+    invalidReason: stock <= 0 ? '商品暂时无库存' : quantity > stock ? `库存仅剩 ${stock} 件，请重新选择数量` : undefined,
+    specData: sku.specData,
+    quantity: safeQuantity,
+    selected: 1,
+    totalAmount: price * safeQuantity,
+  }
 }
 
 function addressLine(address: AddressItem) {
@@ -247,7 +297,7 @@ async function initialize() {
   }
   loading.value = true
   try {
-    await Promise.all([cart.fetchCart(), loadAddresses()])
+    await Promise.all([directBuyMode.value ? loadDirectBuyItem() : cart.fetchCart(), loadAddresses()])
     await loadCoupons()
   } finally {
     loading.value = false
@@ -260,8 +310,8 @@ async function submitOrder() {
     return
   }
   if (!selectedItems.value.length) {
-    ElMessage.warning('请先选择要结算的商品')
-    router.push('/cart')
+    ElMessage.warning(directBuyMode.value ? '直购商品库存不足，请重新选择规格' : '请先选择要结算的商品')
+    router.push(directBuyMode.value && directBuyItem.value?.spuId ? `/product/${directBuyItem.value.spuId}` : '/cart')
     return
   }
   if (!selectedAddressId.value) {
@@ -274,8 +324,13 @@ async function submitOrder() {
       addressId: selectedAddressId.value,
       remark: remark.value.trim() || undefined,
       couponId: selectedCoupon.value?.couponId,
+      items: directBuyMode.value
+        ? selectedItems.value.map((item) => ({ skuId: item.skuId, quantity: item.quantity }))
+        : undefined,
     })
-    await cart.fetchCart()
+    if (!directBuyMode.value) {
+      await cart.fetchCart()
+    }
     const detail = await getOrderByNo(created.data)
     ElMessage.success('订单已提交')
     router.push(`/order/${detail.data.id}?pay=1`)
@@ -300,6 +355,15 @@ watch(payableAmount, () => {
   loadCoupons()
 })
 
+watch(
+  () => route.query,
+  () => {
+    if (auth.isLoggedIn) {
+      initialize()
+    }
+  },
+)
+
 onMounted(initialize)
 </script>
 
@@ -311,10 +375,12 @@ onMounted(initialize)
       <section class="checkout-hero">
         <div>
           <span>Checkout</span>
-          <h1>确认订单</h1>
+          <h1>{{ directBuyMode ? '立即购买' : '确认订单' }}</h1>
           <p>核对收货地址、商品明细和应付金额后提交订单。</p>
         </div>
-        <button class="back-link" type="button" @click="router.push('/cart')">返回购物车</button>
+        <button class="back-link" type="button" @click="router.push(directBuyMode && directBuyItem?.spuId ? `/product/${directBuyItem.spuId}` : '/cart')">
+          {{ directBuyMode ? '返回商品' : '返回购物车' }}
+        </button>
       </section>
 
       <section v-if="!auth.isLoggedIn" class="login-needed">
@@ -394,7 +460,16 @@ onMounted(initialize)
             </article>
 
             <el-empty v-if="!selectedItems.length" description="没有已选商品">
-              <el-button type="primary" @click="router.push('/cart')">返回购物车选择</el-button>
+              <el-alert
+                v-if="directBuyItem?.invalidReason"
+                :title="directBuyItem.invalidReason"
+                type="warning"
+                :closable="false"
+                style="margin-bottom: 14px"
+              />
+              <el-button type="primary" @click="router.push(directBuyMode && directBuyItem?.spuId ? `/product/${directBuyItem.spuId}` : '/cart')">
+                {{ directBuyMode ? '重新选择规格' : '返回购物车选择' }}
+              </el-button>
             </el-empty>
           </section>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   AuditOutlined,
@@ -61,7 +61,16 @@ const visibleMenuItems = computed(() => {
   return menuItems.filter((item) => granted.has(item.permission))
 })
 
-onMounted(fetchCurrentPermissions)
+onMounted(() => {
+  window.addEventListener('mall-admin-auth-expired', handleAuthExpired)
+  window.addEventListener('mall-admin-auth-refreshed', handleAuthRefreshed)
+  fetchCurrentPermissions()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('mall-admin-auth-expired', handleAuthExpired)
+  window.removeEventListener('mall-admin-auth-refreshed', handleAuthRefreshed)
+})
 
 function handleMenu(name: string) {
   router.push({ name })
@@ -97,16 +106,30 @@ async function fetchCurrentPermissions() {
   }
 }
 
+function clearAdminSession() {
+  localStorage.removeItem('admin_token')
+  localStorage.removeItem('admin_refresh_token')
+  localStorage.removeItem('admin_user')
+  localStorage.removeItem('admin_permission_codes')
+}
+
+function handleAuthExpired() {
+  clearAdminSession()
+  router.replace({ path: '/login', query: { redirect: route.fullPath } })
+}
+
+function handleAuthRefreshed() {
+  permissionCodes.value = []
+  fetchCurrentPermissions()
+}
+
 async function logout() {
   try {
     await logoutApi()
   } catch (e) {
     // 本地退出优先，后端 token 失效时也允许回到登录页。
   }
-  localStorage.removeItem('admin_token')
-  localStorage.removeItem('admin_refresh_token')
-  localStorage.removeItem('admin_user')
-  localStorage.removeItem('admin_permission_codes')
+  clearAdminSession()
   router.push('/login')
 }
 </script>

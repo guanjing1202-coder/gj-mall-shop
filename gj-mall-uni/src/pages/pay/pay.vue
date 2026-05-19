@@ -15,6 +15,22 @@
         <text>{{ order.statusDesc || '待支付' }}</text>
       </view>
 
+      <view v-if="Number(order.status) === 0" class="countdown-card">
+        <view>
+          <text>支付剩余时间</text>
+          <text>{{ payCountdown }}</text>
+        </view>
+        <text>超时后订单会自动关闭，库存也会释放。</text>
+      </view>
+
+      <view v-else class="countdown-card done">
+        <view>
+          <text>当前订单状态</text>
+          <text>{{ order.statusDesc || '已处理' }}</text>
+        </view>
+        <text>该订单无需继续支付，可以直接查看订单进度。</text>
+      </view>
+
       <view class="panel">
         <view class="section-head">
           <text>支付方式</text>
@@ -51,8 +67,12 @@
         </view>
       </view>
 
+      <view v-if="payError" class="panel error-card">
+        <text>{{ payError }}</text>
+      </view>
+
       <view class="panel notice">
-        <text>当前项目使用 mock 支付，点击确认后会立即把订单推进到待发货状态。</text>
+        <text>当前项目使用 mock 支付，点击确认后会立即把订单推进到待发货状态；真实微信/支付宝通道已保留接入位置。</text>
       </view>
     </view>
 
@@ -71,7 +91,7 @@
         <text>合计</text>
         <text>{{ formatPrice(order.payAmount) }}</text>
       </view>
-      <button :disabled="submitting || Number(order.status) !== 0" @tap="submitPay">
+      <button :disabled="submitting || Number(order.status) !== 0 || payExpired" @tap="submitPay">
         {{ Number(order.status) === 0 ? '确认支付' : '查看订单' }}
       </button>
     </view>
@@ -79,17 +99,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { computed, onUnmounted, ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { createPay, type PayChannel } from '@/api/pay'
 import { getOrderByNo, getOrderDetail, type OrderDetail, type OrderItem } from '@/api/order'
-import { hasLoginState } from '@/utils/auth'
+import { requireSession } from '@/utils/session'
 
 const loading = ref(false)
 const submitting = ref(false)
 const isLoggedIn = ref(false)
 const order = ref<OrderDetail>()
 const selectedChannel = ref<PayChannel>('mock')
+const now = ref(Date.now())
+const payError = ref('')
+let timer: ReturnType<typeof setInterval> | undefined
 
 const channels: Array<{ value: PayChannel; label: string; desc: string; icon: string; disabled?: boolean }> = [
   { value: 'mock', label: '余额模拟支付', desc: '开发环境即时支付成功', icon: '¥' },
@@ -97,8 +120,27 @@ const channels: Array<{ value: PayChannel; label: string; desc: string; icon: st
   { value: 'alipay', label: '支付宝', desc: '待接入 AppID 与密钥', icon: '支', disabled: true },
 ]
 
-onLoad((options: any) => {
-  isLoggedIn.value = hasLoginState()
+const expireAt = computed(() => {
+  if (!order.value?.createTime) return 0
+  const parsed = new Date(String(order.value.createTime).replace(' ', 'T')).getTime()
+  return Number.isNaN(parsed) ? 0 : parsed + 30 * 60 * 1000
+})
+
+const payExpired = computed(() => {
+  if (Number(order.value?.status) !== 0 || !expireAt.value) return false
+  return now.value >= expireAt.value
+})
+
+const payCountdown = computed(() => {
+  if (!expireAt.value) return '--:--'
+  const remain = Math.max(0, expireAt.value - now.value)
+  const minutes = Math.floor(remain / 60000)
+  const seconds = Math.floor((remain % 60000) / 1000)
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+})
+
+onLoad(async (options: any) => {
+  isLoggedIn.value = await requireSession('请先登录后支付')
   if (!isLoggedIn.value) return
   if (options?.orderNo) {
     loadByNo(decodeURIComponent(options.orderNo))
@@ -107,11 +149,20 @@ onLoad((options: any) => {
   }
 })
 
+onShow(() => {
+  startTimer()
+})
+
+onUnmounted(() => {
+  stopTimer()
+})
+
 async function loadByNo(orderNo: string) {
   loading.value = true
   try {
     const res = await getOrderByNo(orderNo)
     order.value = res.data
+    payError.value = ''
   } finally {
     loading.value = false
   }
@@ -122,6 +173,7 @@ async function loadById(id: string | number) {
   try {
     const res = await getOrderDetail(id)
     order.value = res.data
+    payError.value = ''
   } finally {
     loading.value = false
   }
@@ -138,17 +190,49 @@ function selectChannel(channel: PayChannel) {
 
 async function submitPay() {
   if (!order.value) return
+  if (!(await requireSession('请先登录后支付'))) {
+    isLoggedIn.value = false
+    return
+  }
   if (Number(order.value.status) !== 0) {
     goOrder()
+    return
+  }
+  if (payExpired.value) {
+    payError.value = '订单支付时间已超时，请返回订单详情重新确认状态。'
+    uni.showToast({ title: '订单已超时', icon: 'none' })
     return
   }
   submitting.value = true
   try {
     const res = await createPay({ orderId: order.value.id, channel: selectedChannel.value })
-    uni.showToast({ title: res.data.paid ? '支付成功' : '支付已创建', icon: 'success' })
-    uni.redirectTo({ url: `/pages/order/detail?id=${order.value.id}` })
+    const status = res.data.paid ? 'success' : 'pending'
+    uni.redirectTo({
+      url: `/pages/pay/result?status=${status}&orderId=${order.value.id}&orderNo=${encodeURIComponent(order.value.orderNo)}&payNo=${encodeURIComponent(res.data.payNo || '')}`,
+    })
+  } catch (error: any) {
+    const message = error?.message || '支付失败，请稍后再试'
+    payError.value = message
+    uni.redirectTo({
+      url: `/pages/pay/result?status=fail&orderId=${order.value.id}&orderNo=${encodeURIComponent(order.value.orderNo)}&message=${encodeURIComponent(message)}`,
+    })
   } finally {
     submitting.value = false
+  }
+}
+
+function startTimer() {
+  stopTimer()
+  now.value = Date.now()
+  timer = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+}
+
+function stopTimer() {
+  if (timer) {
+    clearInterval(timer)
+    timer = undefined
   }
 }
 
@@ -192,6 +276,7 @@ function normalizeImage(url?: string, seed = 'pay') {
 
 .hero,
 .amount-card,
+.countdown-card,
 .panel {
   border-radius: 16rpx;
   background: #fff;
@@ -231,6 +316,7 @@ function normalizeImage(url?: string, seed = 'pay') {
 }
 
 .amount-card,
+.countdown-card,
 .panel {
   margin-top: 22rpx;
   padding: 24rpx;
@@ -257,6 +343,44 @@ function normalizeImage(url?: string, seed = 'pay') {
   color: #2f8f67;
   font-size: 24rpx;
   font-weight: 900;
+}
+
+.countdown-card {
+  display: grid;
+  gap: 12rpx;
+}
+
+.countdown-card view {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.countdown-card view text:first-child {
+  color: #6b7280;
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
+.countdown-card view text:last-child {
+  color: #e5484d;
+  font-size: 38rpx;
+  font-weight: 900;
+}
+
+.countdown-card > text {
+  color: #9ca3af;
+  font-size: 23rpx;
+  line-height: 1.45;
+}
+
+.countdown-card.done {
+  background: #eef8f2;
+}
+
+.countdown-card.done view text:last-child {
+  color: #2f8f67;
 }
 
 .section-head {
@@ -395,6 +519,14 @@ function normalizeImage(url?: string, seed = 'pay') {
   color: #92400e;
   font-size: 24rpx;
   line-height: 1.55;
+}
+
+.error-card {
+  background: #fff1f2;
+  color: #be123c;
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 1.5;
 }
 
 .bottom-bar {

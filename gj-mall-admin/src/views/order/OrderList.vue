@@ -45,6 +45,8 @@ const deliverForm = reactive({
   deliveryRemark: '',
 })
 
+const deliveryCompanyOptions = ['顺丰速运', '京东物流', '中通快递', '圆通速递', '韵达快递', '申通快递', '极兔速递']
+
 const columns: TableColumnsType<OrderRecord> = [
   { title: '订单信息', dataIndex: 'orderNo', key: 'orderNo', width: 280 },
   { title: '用户', dataIndex: 'userId', key: 'userId', width: 120 },
@@ -170,6 +172,10 @@ function handleView(record: OrderRecord) {
 }
 
 function handleDeliver(record: OrderRecord) {
+  if (!canDeliver(record)) {
+    message.warning(`当前订单状态为“${statusLabel(record.status, record.statusDesc)}”，不能发货`)
+    return
+  }
   currentOrder.value = record
   deliverForm.deliveryCompany = record.deliveryCompany || '顺丰速运'
   deliverForm.deliveryNo = ''
@@ -189,12 +195,22 @@ async function submitDeliver() {
     message.warning('请输入物流单号')
     return
   }
+  const deliveryNo = deliverForm.deliveryNo.trim().replace(/\s+/g, '')
+  if (deliveryNo.length < 6) {
+    message.warning('物流单号长度过短，请核对后再发货')
+    return
+  }
+  try {
+    await confirmDeliver(currentOrder.value, deliverForm.deliveryCompany.trim(), deliveryNo)
+  } catch {
+    return
+  }
   delivering.value = true
   actionId.value = currentOrder.value.id
   try {
     const res = await deliverOrder(currentOrder.value.id, {
       deliveryCompany: deliverForm.deliveryCompany.trim(),
-      deliveryNo: deliverForm.deliveryNo.trim(),
+      deliveryNo,
       deliveryRemark: deliverForm.deliveryRemark.trim() || undefined,
     })
     message.success('发货成功')
@@ -206,6 +222,19 @@ async function submitDeliver() {
     delivering.value = false
     actionId.value = undefined
   }
+}
+
+function confirmDeliver(record: OrderRecord, company: string, deliveryNo: string) {
+  return new Promise<void>((resolve, reject) => {
+    Modal.confirm({
+      title: '确认发货？',
+      content: `订单 ${record.orderNo} 将标记为待收货，物流：${company} ${deliveryNo}。`,
+      okText: '确认发货',
+      cancelText: '再核对一下',
+      onOk: () => resolve(),
+      onCancel: () => reject(),
+    })
+  })
 }
 
 function handleCancel(record: OrderRecord) {
@@ -265,6 +294,25 @@ function formatSpecs(specs?: Record<string, string>) {
   return items.length ? items.join(' / ') : '--'
 }
 
+function orderItemCount(record?: OrderRecord) {
+  return (record?.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+}
+
+function orderSkuCount(record?: OrderRecord) {
+  return record?.items?.length || 0
+}
+
+function orderPackageHint(record?: OrderRecord) {
+  const totalQuantity = orderItemCount(record)
+  if (!record?.items?.length) {
+    return '暂无商品明细'
+  }
+  if (totalQuantity > 1 || record.items.length > 1) {
+    return `${record.items.length} 个 SKU，共 ${totalQuantity} 件，发货前请核对包裹内商品。`
+  }
+  return '单件商品订单，发货前请核对规格和收货信息。'
+}
+
 function formatReceiver(record?: OrderRecord) {
   const receiver = record?.receiver
   if (!receiver) {
@@ -305,6 +353,45 @@ function payTypeLabel(payType?: number) {
     9: 'Mock 支付',
   }
   return payType === undefined || payType === null ? '--' : map[payType] || `渠道 ${payType}`
+}
+
+function fulfillmentSteps(record?: OrderRecord) {
+  const status = Number(record?.status ?? 0)
+  const closed = status === 4 || status === 6
+  return [
+    {
+      title: '提交订单',
+      description: record?.createTime || '--',
+      done: Boolean(record?.createTime),
+    },
+    {
+      title: '完成支付',
+      description: record?.payTime || (closed ? '--' : '等待买家支付'),
+      done: Boolean(record?.payTime) && !closed,
+    },
+    {
+      title: '商家发货',
+      description: record?.deliveryTime || (status === 1 ? '待运营发货' : '--'),
+      done: Boolean(record?.deliveryTime) && !closed,
+    },
+    {
+      title: '确认收货',
+      description: record?.receiveTime || (status === 2 ? '等待买家确认' : '--'),
+      done: Boolean(record?.receiveTime) && !closed,
+    },
+  ]
+}
+
+function fulfillmentActive(record?: OrderRecord) {
+  const steps = fulfillmentSteps(record)
+  let index = -1
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    if (steps[i].done) {
+      index = i
+      break
+    }
+  }
+  return Math.max(0, index)
 }
 
 function normalizeId(value?: ApiId) {
@@ -486,19 +573,47 @@ function toOrder(record: Record<string, any>) {
     @ok="submitDeliver"
   >
     <template v-if="currentOrder">
+      <div class="deliver-overview">
+        <div>
+          <span>订单号</span>
+          <strong>{{ currentOrder.orderNo }}</strong>
+        </div>
+        <div>
+          <span>应发商品</span>
+          <strong>{{ orderSkuCount(currentOrder) }} SKU / {{ orderItemCount(currentOrder) }} 件</strong>
+        </div>
+        <div>
+          <span>实付金额</span>
+          <strong>{{ formatPrice(currentOrder.payAmount) }}</strong>
+        </div>
+      </div>
+      <a-alert
+        type="info"
+        show-icon
+        :message="orderPackageHint(currentOrder)"
+        style="margin-bottom: 16px"
+      />
       <a-descriptions :column="1" size="small" bordered style="margin-bottom: 16px">
-        <a-descriptions-item label="订单号">{{ currentOrder.orderNo }}</a-descriptions-item>
+        <a-descriptions-item label="订单状态">{{ statusLabel(currentOrder.status, currentOrder.statusDesc) }}</a-descriptions-item>
         <a-descriptions-item label="收货人">{{ formatReceiver(currentOrder) }}</a-descriptions-item>
         <a-descriptions-item label="收货地址">{{ formatAddress(currentOrder) }}</a-descriptions-item>
       </a-descriptions>
+      <div class="deliver-items">
+        <div v-for="item in currentOrder.items || []" :key="item.id" class="deliver-item">
+          <img v-if="item.skuImage" :src="item.skuImage" alt="商品图" />
+          <div>
+            <strong>{{ item.skuName }}</strong>
+            <span>{{ formatSpecs(item.specData) }}</span>
+          </div>
+          <em>x{{ item.quantity }}</em>
+        </div>
+      </div>
       <a-form layout="vertical">
         <a-form-item label="物流公司">
           <a-select v-model:value="deliverForm.deliveryCompany" placeholder="请选择物流公司">
-            <a-select-option value="顺丰速运">顺丰速运</a-select-option>
-            <a-select-option value="京东物流">京东物流</a-select-option>
-            <a-select-option value="中通快递">中通快递</a-select-option>
-            <a-select-option value="圆通速递">圆通速递</a-select-option>
-            <a-select-option value="韵达快递">韵达快递</a-select-option>
+            <a-select-option v-for="company in deliveryCompanyOptions" :key="company" :value="company">
+              {{ company }}
+            </a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item label="物流单号">
@@ -546,6 +661,18 @@ function toOrder(record: Record<string, any>) {
         <a-descriptions-item label="发货备注">{{ currentOrder.deliveryRemark || '--' }}</a-descriptions-item>
         <a-descriptions-item label="备注">{{ currentOrder.remark || '--' }}</a-descriptions-item>
       </a-descriptions>
+
+      <div style="margin-top: 20px">
+        <h4 style="margin-bottom: 12px">履约进度</h4>
+        <a-steps :current="fulfillmentActive(currentOrder)" size="small" responsive>
+          <a-step
+            v-for="step in fulfillmentSteps(currentOrder)"
+            :key="step.title"
+            :title="step.title"
+            :description="step.description"
+          />
+        </a-steps>
+      </div>
 
       <div style="margin-top: 20px">
         <h4 style="margin-bottom: 12px">收货信息</h4>
@@ -676,6 +803,87 @@ function toOrder(record: Record<string, any>) {
   color: #389e0d;
 }
 
+.deliver-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.deliver-overview > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.deliver-overview span,
+.deliver-overview strong {
+  display: block;
+}
+
+.deliver-overview span {
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.deliver-overview strong {
+  overflow: hidden;
+  margin-top: 6px;
+  color: #1f1f1f;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deliver-items {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  margin-bottom: 16px;
+  overflow: auto;
+}
+
+.deliver-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 42px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.deliver-item img {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #f5f5f5;
+}
+
+.deliver-item strong,
+.deliver-item span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deliver-item span {
+  margin-top: 4px;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.deliver-item em {
+  color: #1f1f1f;
+  font-style: normal;
+  font-weight: 700;
+  text-align: right;
+}
+
 @media (max-width: 1200px) {
   .order-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -684,6 +892,10 @@ function toOrder(record: Record<string, any>) {
 
 @media (max-width: 720px) {
   .order-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .deliver-overview {
     grid-template-columns: 1fr;
   }
 }

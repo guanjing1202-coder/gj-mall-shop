@@ -227,6 +227,15 @@ onMounted(async () => {
         <el-button size="large" type="primary" @click="router.push('/coupon-center')">去领优惠券</el-button>
       </section>
 
+      <section class="content-band seckill-promo">
+        <div>
+          <span>Flash Sale</span>
+          <h2>限时秒杀正在进行</h2>
+          <p>实时库存和限购规则已经接入，下单成功后直接进入订单支付。</p>
+        </div>
+        <el-button size="large" type="primary" @click="router.push('/seckill')">去抢购</el-button>
+      </section>
+
       <section class="content-band product-layout">
         <aside class="brand-panel">
           <div class="section-heading compact">
@@ -698,6 +707,49 @@ main {
   font-weight: 900;
 }
 
+.seckill-promo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 18px;
+  background: #111827;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
+  color: #fff;
+}
+
+.seckill-promo span {
+  display: inline-flex;
+  margin-bottom: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 209, 102, 0.14);
+  color: #ffd166;
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.seckill-promo h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.seckill-promo p {
+  margin: 10px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.seckill-promo :deep(.el-button) {
+  border-radius: 12px;
+  background: #ffd166;
+  border-color: transparent;
+  color: #111827;
+  box-shadow: 0 12px 24px rgba(255, 209, 102, 0.2);
+  font-weight: 900;
+}
+
 .brand-panel {
   position: sticky;
   top: 96px;
@@ -1002,6 +1054,10 @@ main {
   }
 
   .coupon-promo {
+    grid-template-columns: 1fr;
+  }
+
+  .seckill-promo {
     grid-template-columns: 1fr;
   }
 

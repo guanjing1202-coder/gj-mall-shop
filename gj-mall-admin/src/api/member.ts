@@ -38,6 +38,21 @@ export interface MemberAddress {
   updateTime?: string
 }
 
+export interface MemberBrowseHistory {
+  spuId: ApiId
+  spuName?: string
+  subTitle?: string
+  mainImage?: string
+  price?: number
+  saleCount?: number
+  publishStatus?: number
+  brandId?: ApiId
+  brandName?: string
+  categoryId?: ApiId
+  categoryName?: string
+  browseTime?: string
+}
+
 export interface MemberRecord {
   id: ApiId
   username: string
@@ -56,6 +71,8 @@ export interface MemberRecord {
   orderCount?: number
   paidAmount?: number
   addresses?: MemberAddress[]
+  browseHistoryTotal?: number
+  browseHistories?: MemberBrowseHistory[]
 }
 
 export function getMemberPage(params: MemberQuery) {

@@ -91,6 +91,25 @@
               <text v-if="itemComment(item)">{{ itemComment(item)?.statusDesc || '已评价' }}</text>
               <button v-else-if="canComment" @tap="openComment(item)">评价</button>
             </view>
+            <view v-if="itemComment(item)" class="order-comment-preview">
+              <view>
+                <text>我的评价</text>
+                <text>{{ itemComment(item)?.score || 5 }} 星</text>
+              </view>
+              <text>{{ itemComment(item)?.content }}</text>
+              <scroll-view v-if="itemComment(item)?.images?.length" scroll-x class="comment-preview-scroll">
+                <view class="comment-preview-row">
+                  <image
+                    v-for="(image, imageIndex) in itemComment(item)?.images"
+                    :key="image + '-' + imageIndex"
+                    :src="normalizeImage(image, `order-comment-${item.id}-${imageIndex}`)"
+                    mode="aspectFill"
+                    @tap="previewImages(itemComment(item)?.images, imageIndex, `order-comment-${item.id}`)"
+                  />
+                </view>
+              </scroll-view>
+              <text v-if="itemComment(item)?.replyContent" class="merchant-reply">商家回复：{{ itemComment(item)?.replyContent }}</text>
+            </view>
           </view>
         </view>
       </view>
@@ -174,6 +193,17 @@
               <text>退货物流</text>
               <text>{{ item.returnCompany || '-' }} {{ item.returnNo || '' }}</text>
             </view>
+            <scroll-view v-if="item.images?.length" scroll-x class="service-images">
+              <view class="service-image-row">
+                <image
+                  v-for="(image, imageIndex) in item.images"
+                  :key="image + '-' + imageIndex"
+                  :src="normalizeImage(image, `after-sale-${item.id}-${imageIndex}`)"
+                  mode="aspectFill"
+                  @tap="previewImages(item.images, imageIndex, `after-sale-${item.id}`)"
+                />
+              </view>
+            </scroll-view>
             <view v-if="[0, 1, 2].includes(Number(item.status))" class="service-actions">
               <button v-if="Number(item.status) === 1" :disabled="serviceActionLoading === item.id" @tap="openReturnDialog(item)">
                 填写物流
@@ -206,6 +236,25 @@
         </view>
         <input v-model="afterSaleForm.reason" class="field" placeholder="售后原因，例如商品破损、发错货" />
         <textarea v-model="afterSaleForm.description" class="textarea" maxlength="500" placeholder="问题描述（选填）" />
+        <view class="image-field">
+          <view class="image-field-head">
+            <text>凭证图片</text>
+            <text>{{ afterSaleForm.images.length }}/{{ MAX_FORM_IMAGES }}</text>
+          </view>
+          <view class="image-input-row">
+            <input v-model="afterSaleForm.imageInput" class="field image-input" placeholder="粘贴图片 URL" />
+            <button @tap="addFormImages('afterSale')">添加</button>
+          </view>
+          <button class="upload-image-btn" :disabled="imageUploading === 'afterSale'" @tap="chooseAndUploadImages('afterSale')">
+            {{ imageUploading === 'afterSale' ? '上传中...' : '选择图片上传' }}
+          </button>
+          <view v-if="afterSaleForm.images.length" class="form-image-grid">
+            <view v-for="(image, index) in afterSaleForm.images" :key="image + '-' + index" class="form-image-card">
+              <image :src="normalizeImage(image, `after-sale-form-${index}`)" mode="aspectFill" @tap="previewFormImages('afterSale', index)" />
+              <button @tap.stop="removeFormImage('afterSale', index)">移除</button>
+            </view>
+          </view>
+        </view>
         <button class="save-btn" :disabled="afterSaleSubmitting" @tap="submitAfterSale">提交申请</button>
       </view>
     </view>
@@ -239,7 +288,25 @@
           </view>
         </view>
         <textarea v-model="commentForm.content" class="textarea" maxlength="500" placeholder="说说商品体验、包装、物流或使用感受" />
-        <textarea v-model="commentForm.imagesText" class="textarea small-textarea" placeholder="图片 URL（选填，多张可用换行或逗号分隔）" />
+        <view class="image-field">
+          <view class="image-field-head">
+            <text>评价图片</text>
+            <text>{{ commentForm.images.length }}/{{ MAX_FORM_IMAGES }}</text>
+          </view>
+          <view class="image-input-row">
+            <input v-model="commentForm.imageInput" class="field image-input" placeholder="粘贴图片 URL" />
+            <button @tap="addFormImages('comment')">添加</button>
+          </view>
+          <button class="upload-image-btn" :disabled="imageUploading === 'comment'" @tap="chooseAndUploadImages('comment')">
+            {{ imageUploading === 'comment' ? '上传中...' : '选择图片上传' }}
+          </button>
+          <view v-if="commentForm.images.length" class="form-image-grid">
+            <view v-for="(image, index) in commentForm.images" :key="image + '-' + index" class="form-image-card">
+              <image :src="normalizeImage(image, `comment-form-${index}`)" mode="aspectFill" @tap="previewFormImages('comment', index)" />
+              <button @tap.stop="removeFormImage('comment', index)">移除</button>
+            </view>
+          </view>
+        </view>
         <button class="save-btn" :disabled="commentSubmitting" @tap="submitComment">提交评价</button>
       </view>
     </view>
@@ -249,6 +316,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { uploadImage } from '@/api/file'
 import {
   cancelAfterSale,
   cancelOrder,
@@ -275,6 +343,7 @@ const logisticsLoading = ref(false)
 const afterSaleSubmitting = ref(false)
 const returnSubmitting = ref(false)
 const commentSubmitting = ref(false)
+const imageUploading = ref<ImageFormKind | ''>('')
 const afterSaleDialogOpen = ref(false)
 const returnDialogOpen = ref(false)
 const commentDialogOpen = ref(false)
@@ -290,6 +359,8 @@ const afterSaleForm = reactive({
   type: 2,
   reason: '',
   description: '',
+  imageInput: '',
+  images: [] as string[],
 })
 
 const returnForm = reactive({
@@ -300,8 +371,10 @@ const returnForm = reactive({
 const commentForm = reactive({
   score: 5,
   content: '',
-  imagesText: '',
+  imageInput: '',
+  images: [] as string[],
 })
+const MAX_FORM_IMAGES = 6
 
 const canPay = computed(() => Number(order.value?.status) === 0)
 const canCancel = computed(() => Number(order.value?.status) === 0)
@@ -434,6 +507,8 @@ function openAfterSale() {
   afterSaleForm.type = Number(order.value?.status) === 1 ? 1 : 2
   afterSaleForm.reason = ''
   afterSaleForm.description = ''
+  afterSaleForm.imageInput = ''
+  afterSaleForm.images = []
   afterSaleDialogOpen.value = true
 }
 
@@ -449,6 +524,7 @@ async function submitAfterSale() {
       type: afterSaleForm.type,
       reason: afterSaleForm.reason.trim(),
       description: afterSaleForm.description.trim() || undefined,
+      images: collectFormImages('afterSale'),
     })
     uni.showToast({ title: '申请已提交', icon: 'success' })
     afterSaleDialogOpen.value = false
@@ -504,7 +580,8 @@ function openComment(item: OrderItem) {
   commentTarget.value = item
   commentForm.score = 5
   commentForm.content = ''
-  commentForm.imagesText = ''
+  commentForm.imageInput = ''
+  commentForm.images = []
   commentDialogOpen.value = true
 }
 
@@ -516,10 +593,7 @@ async function submitComment() {
   }
   commentSubmitting.value = true
   try {
-    const images = commentForm.imagesText
-      .split(/\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean)
+    const images = collectFormImages('comment')
     await createOrderComment(order.value.id, {
       orderItemId: commentTarget.value.id,
       score: commentForm.score,
@@ -557,6 +631,100 @@ function normalizeImage(url?: string, seed = 'order') {
     return `https://picsum.photos/seed/${encodeURIComponent(seed)}/360/360`
   }
   return url
+}
+
+function previewImages(images: string[] = [], index = 0, seed = 'image') {
+  const urls = images.map((image, imageIndex) => normalizeImage(image, `${seed}-${imageIndex}`)).filter(Boolean)
+  if (!urls.length) return
+  uni.previewImage({ urls, current: urls[index] || urls[0] })
+}
+
+type ImageFormKind = 'comment' | 'afterSale'
+
+function splitImageInput(value?: string) {
+  return String(value || '')
+    .split(/[\n,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function imageForm(kind: ImageFormKind) {
+  return kind === 'comment' ? commentForm : afterSaleForm
+}
+
+function imageScene(kind: ImageFormKind) {
+  return kind === 'comment' ? 'comment' : 'after-sale'
+}
+
+async function chooseAndUploadImages(kind: ImageFormKind) {
+  const form = imageForm(kind)
+  const remaining = MAX_FORM_IMAGES - form.images.length
+  if (remaining <= 0) {
+    uni.showToast({ title: `最多添加 ${MAX_FORM_IMAGES} 张`, icon: 'none' })
+    return
+  }
+  try {
+    const chooseRes = await uni.chooseImage({
+      count: remaining,
+      sizeType: ['compressed'],
+      sourceType: ['album', 'camera'],
+    })
+    const paths = chooseRes.tempFilePaths || []
+    if (!paths.length) return
+    imageUploading.value = kind
+    for (const path of paths) {
+      if (form.images.length >= MAX_FORM_IMAGES) break
+      const uploaded = await uploadImage(path, imageScene(kind))
+      if (uploaded.url && !form.images.includes(uploaded.url)) {
+        form.images.push(uploaded.url)
+      }
+    }
+    uni.showToast({ title: '图片已上传', icon: 'success' })
+  } catch (error) {
+    uni.showToast({ title: '图片上传失败', icon: 'none' })
+  } finally {
+    imageUploading.value = ''
+  }
+}
+
+function addFormImages(kind: ImageFormKind) {
+  const form = imageForm(kind)
+  const additions = splitImageInput(form.imageInput)
+  if (!additions.length) {
+    uni.showToast({ title: '请先粘贴图片 URL', icon: 'none' })
+    return
+  }
+  const merged: string[] = []
+  ;[...form.images, ...additions].forEach((image) => {
+    if (!merged.includes(image) && merged.length < MAX_FORM_IMAGES) {
+      merged.push(image)
+    }
+  })
+  form.images = merged
+  form.imageInput = ''
+  if (merged.length >= MAX_FORM_IMAGES) {
+    uni.showToast({ title: `最多添加 ${MAX_FORM_IMAGES} 张`, icon: 'none' })
+  }
+}
+
+function removeFormImage(kind: ImageFormKind, index: number) {
+  imageForm(kind).images.splice(index, 1)
+}
+
+function collectFormImages(kind: ImageFormKind) {
+  const form = imageForm(kind)
+  const merged: string[] = []
+  ;[...form.images, ...splitImageInput(form.imageInput)].forEach((image) => {
+    if (!merged.includes(image) && merged.length < MAX_FORM_IMAGES) {
+      merged.push(image)
+    }
+  })
+  return merged
+}
+
+function previewFormImages(kind: ImageFormKind, index: number) {
+  const images = imageForm(kind).images
+  previewImages(images, index, `${kind}-form`)
 }
 </script>
 
@@ -903,6 +1071,63 @@ function normalizeImage(url?: string, seed = 'order') {
   line-height: 50rpx;
 }
 
+.order-comment-preview {
+  display: grid;
+  gap: 10rpx;
+  margin-top: 12rpx;
+  padding: 16rpx;
+  border-radius: 14rpx;
+  background: #fbfcf8;
+}
+
+.order-comment-preview > view:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.order-comment-preview > view:first-child text:first-child {
+  color: #2f8f67;
+  font-size: 23rpx;
+  font-weight: 900;
+}
+
+.order-comment-preview > view:first-child text:last-child {
+  color: #f59e0b;
+  font-size: 23rpx;
+  font-weight: 900;
+}
+
+.order-comment-preview > text {
+  color: #374151;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
+.comment-preview-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.comment-preview-row {
+  display: flex;
+  gap: 12rpx;
+}
+
+.comment-preview-row image {
+  width: 112rpx;
+  height: 112rpx;
+  flex: 0 0 auto;
+  border-radius: 12rpx;
+  background: #eef2f7;
+}
+
+.order-comment-preview .merchant-reply {
+  padding-top: 10rpx;
+  border-top: 1rpx solid #eef0f3;
+  color: #6b7280;
+}
+
 .info-row {
   gap: 24rpx;
   padding: 14rpx 0;
@@ -1020,6 +1245,25 @@ function normalizeImage(url?: string, seed = 'order') {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.service-images {
+  width: 100%;
+  margin-top: 12rpx;
+  white-space: nowrap;
+}
+
+.service-image-row {
+  display: flex;
+  gap: 12rpx;
+}
+
+.service-image-row image {
+  width: 128rpx;
+  height: 128rpx;
+  flex: 0 0 auto;
+  border-radius: 12rpx;
+  background: #eef2f7;
 }
 
 .service-actions {
@@ -1169,6 +1413,101 @@ function normalizeImage(url?: string, seed = 'order') {
 
 .small-textarea {
   min-height: 118rpx;
+}
+
+.image-field {
+  margin-top: 16rpx;
+}
+
+.image-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+}
+
+.image-field-head text:first-child {
+  color: #111827;
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
+.image-field-head text:last-child {
+  color: #9ca3af;
+  font-size: 23rpx;
+  font-weight: 800;
+}
+
+.image-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 122rpx;
+  gap: 12rpx;
+}
+
+.image-input-row .image-input {
+  margin-top: 0;
+}
+
+.image-input-row button {
+  height: 78rpx;
+  margin: 0;
+  border-radius: 14rpx;
+  background: #111827;
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 78rpx;
+}
+
+.upload-image-btn {
+  width: 100%;
+  height: 72rpx;
+  margin: 12rpx 0 0;
+  border-radius: 14rpx;
+  background: #eef2f7;
+  color: #111827;
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 72rpx;
+}
+
+.upload-image-btn[disabled] {
+  opacity: 0.7;
+}
+
+.form-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12rpx;
+  margin-top: 14rpx;
+}
+
+.form-image-card {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 14rpx;
+  background: #eef2f7;
+}
+
+.form-image-card image {
+  width: 100%;
+  height: 100%;
+}
+
+.form-image-card button {
+  position: absolute;
+  right: 8rpx;
+  bottom: 8rpx;
+  height: 42rpx;
+  margin: 0;
+  padding: 0 14rpx;
+  border-radius: 999rpx;
+  background: rgba(17, 24, 39, 0.86);
+  color: #fff;
+  font-size: 21rpx;
+  font-weight: 900;
+  line-height: 42rpx;
 }
 
 .save-btn {

@@ -30,6 +30,7 @@ const navItems = [
   { label: '热卖', path: '/products?sort=sales' },
   { label: '品牌馆', path: '/products?focus=brands' },
   { label: '领券', path: '/coupon-center' },
+  { label: '秒杀', path: '/seckill' },
 ]
 
 const activePath = computed(() => route.path)
@@ -80,6 +81,11 @@ function handleAuthExpired() {
   auth.openLoginDialog()
 }
 
+function handleAuthRefreshed() {
+  auth.hydrateSessionFromStorage()
+  cart.fetchCart()
+}
+
 function goCart() {
   if (!auth.isLoggedIn) {
     openLogin('login')
@@ -104,12 +110,36 @@ function goCoupons() {
   router.push('/coupons')
 }
 
+function goFavorites() {
+  if (!auth.isLoggedIn) {
+    openLogin('login')
+    return
+  }
+  router.push('/favorites')
+}
+
+function goHistory() {
+  if (!auth.isLoggedIn) {
+    openLogin('login')
+    return
+  }
+  router.push('/history')
+}
+
 function goAfterSales() {
   if (!auth.isLoggedIn) {
     openLogin('login')
     return
   }
   router.push('/after-sales')
+}
+
+function goAddresses() {
+  if (!auth.isLoggedIn) {
+    openLogin('login')
+    return
+  }
+  router.push('/addresses')
 }
 
 function goProfile() {
@@ -122,6 +152,7 @@ function goProfile() {
 
 onMounted(() => {
   window.addEventListener('mall-auth-expired', handleAuthExpired)
+  window.addEventListener('mall-auth-refreshed', handleAuthRefreshed)
   if (auth.isLoggedIn) {
     cart.fetchCart()
   }
@@ -129,6 +160,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('mall-auth-expired', handleAuthExpired)
+  window.removeEventListener('mall-auth-refreshed', handleAuthRefreshed)
 })
 </script>
 
@@ -180,6 +212,9 @@ onBeforeUnmount(() => {
               <el-dropdown-item @click="goCart">我的购物车</el-dropdown-item>
               <el-dropdown-item @click="goOrders">我的订单</el-dropdown-item>
               <el-dropdown-item @click="goCoupons">我的优惠券</el-dropdown-item>
+              <el-dropdown-item @click="goFavorites">我的收藏</el-dropdown-item>
+              <el-dropdown-item @click="goHistory">浏览足迹</el-dropdown-item>
+              <el-dropdown-item @click="goAddresses">收货地址</el-dropdown-item>
               <el-dropdown-item @click="goAfterSales">我的售后</el-dropdown-item>
               <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
             </el-dropdown-menu>

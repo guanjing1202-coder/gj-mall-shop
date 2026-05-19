@@ -132,7 +132,7 @@ onMounted(() => {
             <div class="item-info">
               <strong>{{ item.spuName || item.skuName || '商品' }}</strong>
               <small>{{ specText(item) }}</small>
-              <em v-if="item.invalid">商品失效或库存不足</em>
+              <em v-if="item.invalid">{{ item.invalidReason || '商品失效或库存不足' }}</em>
               <span v-else>库存 {{ item.stock ?? 0 }}</span>
             </div>
             <div class="item-price">{{ formatPrice(item.price) }}</div>

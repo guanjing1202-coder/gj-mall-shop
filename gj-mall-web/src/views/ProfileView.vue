@@ -5,6 +5,8 @@ import { useRouter } from 'vue-router'
 import ShopHeader from '@/components/ShopHeader.vue'
 import { getAddressList } from '@/api/address'
 import { getMyCoupons } from '@/api/coupon'
+import { getFavoritePage } from '@/api/favorite'
+import { getHistoryPage } from '@/api/history'
 import { getOrderPage } from '@/api/order'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
@@ -19,6 +21,8 @@ const orderTotal = ref(0)
 const addressTotal = ref(0)
 const couponTotal = ref(0)
 const usableCouponTotal = ref(0)
+const favoriteTotal = ref(0)
+const historyTotal = ref(0)
 const profileForm = reactive({
   nickname: '',
   phone: '',
@@ -34,7 +38,9 @@ const quickActions = computed(() => [
   { label: '我的订单', value: orderTotal.value, path: '/orders' },
   { label: '购物车商品', value: cart.totalCount, path: '/cart' },
   { label: '可用优惠券', value: usableCouponTotal.value, path: '/coupons' },
-  { label: '收货地址', value: addressTotal.value, path: '/checkout' },
+  { label: '我的收藏', value: favoriteTotal.value, path: '/favorites' },
+  { label: '浏览足迹', value: historyTotal.value, path: '/history' },
+  { label: '收货地址', value: addressTotal.value, path: '/addresses' },
   { label: '售后进度', value: '查看', path: '/after-sales' },
 ])
 
@@ -53,11 +59,13 @@ async function loadDashboard() {
   }
   loading.value = true
   try {
-    const [profile, orders, addresses, coupons] = await Promise.all([
+    const [profile, orders, addresses, coupons, favorites, histories] = await Promise.all([
       auth.loadProfile(),
       getOrderPage({ pageNum: 1, pageSize: 1 }),
       getAddressList(),
       getMyCoupons(),
+      getFavoritePage({ current: 1, size: 1 }),
+      getHistoryPage({ current: 1, size: 1 }),
       cart.fetchCart(),
     ])
     if (profile) {
@@ -67,6 +75,8 @@ async function loadDashboard() {
     addressTotal.value = addresses.data?.length || 0
     couponTotal.value = coupons.data?.length || 0
     usableCouponTotal.value = (coupons.data || []).filter((item) => Number(item.status) === 0).length
+    favoriteTotal.value = Number(favorites.data?.total || 0)
+    historyTotal.value = Number(histories.data?.total || 0)
   } finally {
     loading.value = false
   }
@@ -198,6 +208,10 @@ onMounted(() => {
               <strong>领券中心</strong>
               <span>领取满减、新人和折扣优惠</span>
             </button>
+            <button type="button" @click="router.push('/seckill')">
+              <strong>限时秒杀</strong>
+              <span>查看进行中的低价抢购活动</span>
+            </button>
             <button type="button" @click="router.push('/orders')">
               <strong>订单售后</strong>
               <span>查看支付、物流、确认收货</span>
@@ -206,9 +220,17 @@ onMounted(() => {
               <strong>售后进度</strong>
               <span>跟踪退款、退货和审核状态</span>
             </button>
-            <button type="button" @click="router.push('/checkout')">
+            <button type="button" @click="router.push('/favorites')">
+              <strong>我的收藏</strong>
+              <span>查看常逛常买的商品清单</span>
+            </button>
+            <button type="button" @click="router.push('/history')">
+              <strong>浏览足迹</strong>
+              <span>回到最近看过的商品</span>
+            </button>
+            <button type="button" @click="router.push('/addresses')">
               <strong>收货地址</strong>
-              <span>结算时新增或维护地址</span>
+              <span>维护常用收件人和默认地址</span>
             </button>
           </div>
         </section>

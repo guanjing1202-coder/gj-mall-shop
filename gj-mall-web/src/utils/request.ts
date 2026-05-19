@@ -7,12 +7,70 @@ const service: AxiosInstance = axios.create({
 })
 
 const authExpiredCodes = new Set([2001, 2006, 2007])
+let refreshing: Promise<boolean> | null = null
 
 function clearExpiredSession() {
   localStorage.removeItem('mall_token')
   localStorage.removeItem('mall_refresh_token')
   localStorage.removeItem('mall_user')
   window.dispatchEvent(new Event('mall-auth-expired'))
+}
+
+function saveRefreshedSession(data?: {
+  accessToken?: string
+  refreshToken?: string
+  user?: unknown
+}) {
+  if (!data?.accessToken) {
+    return false
+  }
+  localStorage.setItem('mall_token', data.accessToken)
+  if (data.refreshToken) {
+    localStorage.setItem('mall_refresh_token', data.refreshToken)
+  }
+  if (data.user) {
+    localStorage.setItem('mall_user', JSON.stringify(data.user))
+  }
+  window.dispatchEvent(new Event('mall-auth-refreshed'))
+  return true
+}
+
+function refreshSession() {
+  if (refreshing) {
+    return refreshing
+  }
+  const refreshToken = localStorage.getItem('mall_refresh_token')
+  if (!refreshToken) {
+    clearExpiredSession()
+    return Promise.resolve(false)
+  }
+  refreshing = axios
+    .post(
+      `/api/user/auth/refresh?refreshToken=${encodeURIComponent(refreshToken)}`,
+      undefined,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Type': 'pc',
+        },
+      },
+    )
+    .then((resp) => {
+      const body = resp.data
+      if (body?.code === 200 && saveRefreshedSession(body.data)) {
+        return true
+      }
+      clearExpiredSession()
+      return false
+    })
+    .catch(() => {
+      clearExpiredSession()
+      return false
+    })
+    .finally(() => {
+      refreshing = null
+    })
+  return refreshing
 }
 
 service.interceptors.request.use((config) => {
@@ -26,10 +84,18 @@ service.interceptors.request.use((config) => {
 })
 
 service.interceptors.response.use(
-  (resp) => {
+  async (resp) => {
     const body = resp.data
     if (body && typeof body === 'object' && 'code' in body) {
       if (body.code !== 200) {
+        const originalConfig = resp.config as AxiosRequestConfig & { _retry?: boolean }
+        if (authExpiredCodes.has(Number(body.code)) && !originalConfig._retry) {
+          originalConfig._retry = true
+          const refreshed = await refreshSession()
+          if (refreshed) {
+            return service(originalConfig)
+          }
+        }
         if (authExpiredCodes.has(Number(body.code))) {
           clearExpiredSession()
         }

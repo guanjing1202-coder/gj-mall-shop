@@ -40,7 +40,7 @@
       <view v-if="product.skus?.length" class="panel">
         <view class="section-head">
           <text>选择规格</text>
-          <text class="muted">库存 {{ currentSku?.stock ?? 0 }}</text>
+          <text class="muted">{{ stockHint }}</text>
         </view>
         <view class="sku-grid">
           <view
@@ -58,6 +58,10 @@
           <text>已选</text>
           <text>{{ skuLabel(currentSku) }} · {{ formatPrice(currentSku.price || product.price) }}</text>
         </view>
+        <view class="stock-hint" :class="{ warning: currentStock <= 5, empty: currentStock <= 0 }">
+          <text>{{ stockHint }}</text>
+          <text v-if="currentLockedStock > 0">{{ currentLockedStock }} 件正在锁定待支付</text>
+        </view>
       </view>
 
       <view class="panel quantity-panel">
@@ -66,9 +70,9 @@
           <text class="muted">最多 {{ maxQuantity }} 件</text>
         </view>
         <view class="counter">
-          <button :disabled="quantity <= 1" @tap="changeQuantity(-1)">-</button>
+          <button :disabled="quantity <= 1 || !canBuyCurrentSku" @tap="changeQuantity(-1)">-</button>
           <text>{{ quantity }}</text>
-          <button :disabled="quantity >= maxQuantity" @tap="changeQuantity(1)">+</button>
+          <button :disabled="quantity >= maxQuantity || !canBuyCurrentSku" @tap="changeQuantity(1)">+</button>
         </view>
       </view>
 
@@ -182,8 +186,8 @@
 
     <view v-if="product" class="bottom-bar">
       <button class="ghost-btn" @tap="goCart">购物车</button>
-      <button class="secondary-btn" :disabled="submitting" @tap="addToCart(false)">加入购物车</button>
-      <button class="primary-btn" :disabled="submitting" @tap="addToCart(true)">立即购买</button>
+      <button class="secondary-btn" :disabled="submitting || !canBuyCurrentSku" @tap="addToCart(false)">加入购物车</button>
+      <button class="primary-btn" :disabled="submitting || !canBuyCurrentSku" @tap="addToCart(true)">立即购买</button>
     </view>
   </view>
 </template>
@@ -206,7 +210,7 @@ import {
   type ProductItem,
   type ProductSku,
 } from '@/api/product'
-import { hasLoginState } from '@/utils/auth'
+import { requireSession, syncSession } from '@/utils/session'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -231,6 +235,16 @@ const currentSku = computed(() => {
   return product.value?.skus?.find((sku) => String(sku.id) === String(selectedSkuId.value))
 })
 
+const currentStock = computed(() => Number(currentSku.value?.stock || 0))
+const currentLockedStock = computed(() => Number(currentSku.value?.lockedStock || 0))
+const canBuyCurrentSku = computed(() => Boolean(currentSku.value) && currentStock.value > 0)
+const stockHint = computed(() => {
+  if (!currentSku.value) return '请选择商品规格'
+  if (currentStock.value <= 0) return '该规格暂时无库存'
+  if (currentStock.value <= 5) return `库存紧张，仅剩 ${currentStock.value} 件`
+  return `库存 ${currentStock.value} 件`
+})
+
 const gallery = computed(() => {
   const detail = product.value
   if (!detail) return []
@@ -239,7 +253,7 @@ const gallery = computed(() => {
   return unique.length ? unique : [`seed:${detail.id}`]
 })
 
-const maxQuantity = computed(() => Math.max(1, Number(currentSku.value?.stock || 1)))
+const maxQuantity = computed(() => Math.max(1, currentStock.value || 1))
 
 onLoad((options: any) => {
   loadDetail(options?.id)
@@ -292,7 +306,7 @@ function previewImages(images?: string[], current?: string) {
 }
 
 async function loadFavoriteStatus(spuId: ApiId) {
-  if (!hasLoginState()) return
+  if (!(await syncSession())) return
   try {
     const res = await getFavoriteStatus(spuId)
     favoriteActive.value = Boolean(res.data)
@@ -302,7 +316,7 @@ async function loadFavoriteStatus(spuId: ApiId) {
 }
 
 async function recordBrowseHistory(spuId: ApiId) {
-  if (!hasLoginState()) return
+  if (!(await syncSession())) return
   try {
     await recordHistory(spuId)
   } catch (error) {
@@ -312,11 +326,7 @@ async function recordBrowseHistory(spuId: ApiId) {
 
 async function toggleFavorite() {
   if (!product.value) return
-  if (!hasLoginState()) {
-    uni.showToast({ title: '请先登录', icon: 'none' })
-    uni.switchTab({ url: '/pages/user/user' })
-    return
-  }
+  if (!(await requireSession())) return
   favoriteLoading.value = true
   try {
     if (favoriteActive.value) {
@@ -377,13 +387,18 @@ function changeQuantity(step: number) {
 }
 
 async function addToCart(redirect = false) {
-  if (!hasLoginState()) {
-    uni.showToast({ title: '请先登录', icon: 'none' })
-    uni.switchTab({ url: '/pages/user/user' })
-    return
-  }
+  if (!(await requireSession())) return
   if (!currentSku.value) {
     uni.showToast({ title: '请选择商品规格', icon: 'none' })
+    return
+  }
+  if (!canBuyCurrentSku.value) {
+    uni.showToast({ title: '该规格暂无库存', icon: 'none' })
+    return
+  }
+  if (quantity.value > currentStock.value) {
+    quantity.value = maxQuantity.value
+    uni.showToast({ title: '购买数量已按库存上限调整', icon: 'none' })
     return
   }
   if (redirect) {
@@ -690,6 +705,25 @@ function normalizeImage(url?: string, seed = 'detail') {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.stock-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 14rpx;
+  color: #2f8f67;
+  font-size: 23rpx;
+  font-weight: 900;
+}
+
+.stock-hint.warning {
+  color: #b7791f;
+}
+
+.stock-hint.empty {
+  color: #e5484d;
 }
 
 .counter {

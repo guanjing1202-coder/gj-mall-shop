@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElImageViewer, ElMessage, ElMessageBox } from 'element-plus'
+import type { UploadRequestOptions } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import ShopHeader from '@/components/ShopHeader.vue'
+import { uploadImage } from '@/api/file'
 import {
   cancelAfterSale,
   cancelOrder,
@@ -11,12 +13,14 @@ import {
   getOrderAfterSales,
   getOrderComments,
   getOrderDetail,
+  getOrderLogistics,
   receiveOrder,
   submitAfterSaleReturn,
   type AfterSale,
   type OrderComment,
   type OrderDetail,
   type OrderItem,
+  type OrderLogistics,
 } from '@/api/order'
 import { createPay, type PayChannel } from '@/api/pay'
 import { useAuthStore } from '@/stores/auth'
@@ -30,16 +34,21 @@ const cart = useCartStore()
 const loading = ref(false)
 const actionLoading = ref<'pay' | 'cancel' | 'receive' | ''>('')
 const order = ref<OrderDetail>()
+const logistics = ref<OrderLogistics>()
 const comments = ref<OrderComment[]>([])
 const afterSales = ref<AfterSale[]>([])
 const payChannel = ref<PayChannel>('mock')
+const previewImages = ref<string[]>([])
+const previewIndex = ref(0)
+const imageUploading = ref<ImageFormKind | ''>('')
 const commentDialogOpen = ref(false)
 const commenting = ref(false)
 const commentTarget = ref<OrderItem>()
 const commentForm = ref({
   score: 5,
   content: '',
-  imagesText: '',
+  imageInput: '',
+  images: [] as string[],
 })
 const afterSaleDialogOpen = ref(false)
 const afterSaleSubmitting = ref(false)
@@ -51,12 +60,14 @@ const afterSaleForm = ref({
   type: 2,
   reason: '',
   description: '',
-  imagesText: '',
+  imageInput: '',
+  images: [] as string[],
 })
 const returnForm = ref({
   returnCompany: '',
   returnNo: '',
 })
+const MAX_FORM_IMAGES = 6
 
 const canPay = computed(() => Number(order.value?.status) === 0)
 const canCancel = computed(() => Number(order.value?.status) === 0)
@@ -84,6 +95,13 @@ const activeStep = computed(() => {
   if (status === 3) return 3
   return 0
 })
+const logisticsTraces = computed(() => logistics.value?.traces || [])
+const commentPreviewImages = computed(() =>
+  commentForm.value.images.map((image, index) => normalizeImage(image, `comment-form-${index}`)),
+)
+const afterSalePreviewImages = computed(() =>
+  afterSaleForm.value.images.map((image, index) => normalizeImage(image, `after-sale-form-${index}`)),
+)
 
 function statusClass(status?: number) {
   const code = Number(status)
@@ -144,6 +162,102 @@ function specText(item: OrderItem) {
   return values.length ? values.join(' / ') : '默认规格'
 }
 
+type ImageFormKind = 'comment' | 'afterSale'
+
+function splitImageInput(value?: string) {
+  return String(value || '')
+    .split(/[\n,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function imageForm(kind: ImageFormKind) {
+  return kind === 'comment' ? commentForm.value : afterSaleForm.value
+}
+
+function imageScene(kind: ImageFormKind) {
+  return kind === 'comment' ? 'comment' : 'after-sale'
+}
+
+async function uploadFormImage(kind: ImageFormKind, options: UploadRequestOptions) {
+  const form = imageForm(kind)
+  if (form.images.length >= MAX_FORM_IMAGES) {
+    ElMessage.info(`最多添加 ${MAX_FORM_IMAGES} 张图片`)
+    options.onError(new Error('image limit exceeded') as any)
+    return
+  }
+  imageUploading.value = kind
+  try {
+    const res = await uploadImage(options.file as File, imageScene(kind))
+    if (res.data?.url && !form.images.includes(res.data.url)) {
+      form.images.push(res.data.url)
+    }
+    ElMessage.success('图片已上传')
+    options.onSuccess(res.data)
+  } catch (error) {
+    options.onError(error as any)
+  } finally {
+    imageUploading.value = ''
+  }
+}
+
+function uploadCommentImage(options: UploadRequestOptions) {
+  return uploadFormImage('comment', options)
+}
+
+function uploadAfterSaleImage(options: UploadRequestOptions) {
+  return uploadFormImage('afterSale', options)
+}
+
+function addFormImages(kind: ImageFormKind) {
+  const form = imageForm(kind)
+  const additions = splitImageInput(form.imageInput)
+  if (!additions.length) {
+    ElMessage.warning('请先粘贴图片 URL')
+    return
+  }
+  const merged: string[] = []
+  ;[...form.images, ...additions].forEach((image) => {
+    if (!merged.includes(image) && merged.length < MAX_FORM_IMAGES) {
+      merged.push(image)
+    }
+  })
+  form.images = merged
+  form.imageInput = ''
+  if (additions.length && merged.length >= MAX_FORM_IMAGES) {
+    ElMessage.info(`最多添加 ${MAX_FORM_IMAGES} 张图片`)
+  }
+}
+
+function removeFormImage(kind: ImageFormKind, index: number) {
+  imageForm(kind).images.splice(index, 1)
+}
+
+function previewImageList(images: string[] = [], index = 0, seed = 'image') {
+  const urls = images.map((image, imageIndex) => normalizeImage(image, `${seed}-${imageIndex}`)).filter(Boolean)
+  if (!urls.length) {
+    return
+  }
+  previewImages.value = urls
+  previewIndex.value = index
+}
+
+function closePreview() {
+  previewImages.value = []
+  previewIndex.value = 0
+}
+
+function collectFormImages(kind: ImageFormKind) {
+  const form = imageForm(kind)
+  const merged: string[] = []
+  ;[...form.images, ...splitImageInput(form.imageInput)].forEach((image) => {
+    if (!merged.includes(image) && merged.length < MAX_FORM_IMAGES) {
+      merged.push(image)
+    }
+  })
+  return merged
+}
+
 function receiverLine(detail?: OrderDetail) {
   const receiver = detail?.receiver
   if (!receiver) {
@@ -162,12 +276,14 @@ async function loadOrder() {
     const res = await getOrderDetail(route.params.id as string)
     order.value = res.data
     if (res.data?.id) {
-      const [commentRes, afterSaleRes] = await Promise.all([
+      const [commentRes, afterSaleRes, logisticsRes] = await Promise.all([
         getOrderComments(res.data.id),
         getOrderAfterSales(res.data.id),
+        getOrderLogistics(res.data.id),
       ])
       comments.value = commentRes.data || []
       afterSales.value = afterSaleRes.data || []
+      logistics.value = logisticsRes.data
     }
     await cart.fetchCart()
   } finally {
@@ -184,7 +300,8 @@ function openComment(item: OrderItem) {
   commentForm.value = {
     score: 5,
     content: '',
-    imagesText: '',
+    imageInput: '',
+    images: [],
   }
   commentDialogOpen.value = true
 }
@@ -199,10 +316,7 @@ async function submitComment() {
   }
   commenting.value = true
   try {
-    const images = commentForm.value.imagesText
-      .split(/\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean)
+    const images = collectFormImages('comment')
     await createOrderComment(order.value.id, {
       orderItemId: commentTarget.value.id,
       score: commentForm.value.score,
@@ -222,7 +336,8 @@ function openAfterSale() {
     type: Number(order.value?.status) === 1 ? 1 : 2,
     reason: '',
     description: '',
-    imagesText: '',
+    imageInput: '',
+    images: [],
   }
   afterSaleDialogOpen.value = true
 }
@@ -237,10 +352,7 @@ async function submitAfterSale() {
   }
   afterSaleSubmitting.value = true
   try {
-    const images = afterSaleForm.value.imagesText
-      .split(/\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean)
+    const images = collectFormImages('afterSale')
     await createAfterSale(order.value.id, {
       type: afterSaleForm.value.type,
       reason: afterSaleForm.value.reason.trim(),
@@ -313,8 +425,25 @@ async function payOrder() {
   actionLoading.value = 'pay'
   try {
     const res = await createPay({ orderId: order.value.id, channel: payChannel.value })
-    ElMessage.success(res.data.paid ? '支付成功' : '支付已创建')
-    await loadOrder()
+    router.replace({
+      path: '/pay/result',
+      query: {
+        status: res.data.paid ? 'success' : 'pending',
+        orderId: String(order.value.id),
+        orderNo: order.value.orderNo,
+        payNo: res.data.payNo || '',
+      },
+    })
+  } catch (error: any) {
+    router.replace({
+      path: '/pay/result',
+      query: {
+        status: 'fail',
+        orderId: String(order.value.id),
+        orderNo: order.value.orderNo,
+        message: error?.message || '支付失败，请稍后再试',
+      },
+    })
   } finally {
     actionLoading.value = ''
   }
@@ -442,6 +571,30 @@ onMounted(loadOrder)
                 <em v-if="itemComment(item)">{{ itemComment(item)?.statusDesc || '已评价' }}</em>
                 <button v-else-if="canComment" type="button" @click="openComment(item)">评价</button>
               </div>
+              <div v-if="itemComment(item)" class="order-comment-preview">
+                <div>
+                  <span>我的评价</span>
+                  <el-rate :model-value="itemComment(item)?.score || 5" disabled size="small" />
+                </div>
+                <p>{{ itemComment(item)?.content }}</p>
+                <div v-if="itemComment(item)?.images?.length" class="comment-preview-images">
+                  <button
+                    v-for="(image, index) in itemComment(item)?.images"
+                    :key="`${item.id}-${image}`"
+                    type="button"
+                    @click="previewImageList(itemComment(item)?.images, index, `order-comment-${item.id}`)"
+                  >
+                    <img
+                      :src="normalizeImage(image, `order-comment-${item.id}-${index}`)"
+                      alt="评价图片"
+                      @error="handleImageError($event, `order-comment-${item.id}-${index}`)"
+                    />
+                  </button>
+                </div>
+                <p v-if="itemComment(item)?.replyContent" class="merchant-comment-reply">
+                  商家回复：{{ itemComment(item)?.replyContent }}
+                </p>
+              </div>
             </article>
           </section>
 
@@ -471,18 +624,43 @@ onMounted(loadOrder)
               <dl>
                 <div>
                   <dt>物流公司</dt>
-                  <dd>{{ order.deliveryCompany || '-' }}</dd>
+                  <dd>{{ logistics?.deliveryCompany || order.deliveryCompany || '-' }}</dd>
                 </div>
                 <div>
                   <dt>物流单号</dt>
-                  <dd>{{ order.deliveryNo || '-' }}</dd>
+                  <dd>{{ logistics?.deliveryNo || order.deliveryNo || '-' }}</dd>
                 </div>
                 <div>
                   <dt>备注</dt>
-                  <dd>{{ order.deliveryRemark || order.remark || '-' }}</dd>
+                  <dd>{{ logistics?.deliveryRemark || order.deliveryRemark || order.remark || '-' }}</dd>
                 </div>
               </dl>
             </article>
+          </section>
+
+          <section class="detail-block logistics-block">
+            <div class="block-heading">
+              <div>
+                <span>Tracking</span>
+                <h2>物流轨迹</h2>
+              </div>
+              <strong>{{ logistics?.statusDesc || order.statusDesc || '-' }}</strong>
+            </div>
+
+            <div v-if="logisticsTraces.length" class="tracking-list">
+              <article v-for="trace in logisticsTraces" :key="`${trace.title}-${trace.time}`" :class="{ active: trace.active }">
+                <i />
+                <div>
+                  <strong>{{ trace.title }}</strong>
+                  <span>{{ trace.description || '-' }}</span>
+                </div>
+                <time>{{ formatTime(trace.time) }}</time>
+              </article>
+            </div>
+            <div v-else class="tracking-empty">
+              <strong>暂无物流轨迹</strong>
+              <span>订单支付后，商家会在发货时更新物流公司和单号。</span>
+            </div>
           </section>
 
           <section class="detail-block after-sale-block">
@@ -525,6 +703,20 @@ onMounted(loadOrder)
                     <dd>{{ item.returnCompany || '-' }} {{ item.returnNo || '' }}</dd>
                   </div>
                 </dl>
+                <div v-if="item.images?.length" class="after-sale-images">
+                  <button
+                    v-for="(image, index) in item.images"
+                    :key="`${item.id}-${image}`"
+                    type="button"
+                    @click="previewImageList(item.images, index, `after-sale-${item.id}`)"
+                  >
+                    <img
+                      :src="normalizeImage(image, `after-sale-${item.id}-${index}`)"
+                      alt="售后凭证"
+                      @error="handleImageError($event, `after-sale-${item.id}-${index}`)"
+                    />
+                  </button>
+                </div>
                 <div v-if="[0, 1, 2].includes(Number(item.status))" class="after-sale-actions">
                   <el-button
                     v-if="Number(item.status) === 1"
@@ -645,13 +837,34 @@ onMounted(loadOrder)
             placeholder="说说商品体验、包装、物流或使用感受"
           />
         </el-form-item>
-        <el-form-item label="图片 URL">
-          <el-input
-            v-model="commentForm.imagesText"
-            type="textarea"
-            :rows="3"
-            placeholder="选填，多张图片可用换行或逗号分隔"
-          />
+        <el-form-item label="评价图片">
+          <div class="image-url-field">
+            <el-input
+              v-model="commentForm.imageInput"
+              placeholder="粘贴图片 URL，可一次粘贴多条"
+              @keyup.enter="addFormImages('comment')"
+            />
+            <el-button @click="addFormImages('comment')">添加</el-button>
+          </div>
+          <el-upload
+            class="image-upload-action"
+            accept="image/*"
+            :show-file-list="false"
+            :http-request="(options) => uploadFormImage('comment', options)"
+          >
+            <el-button :loading="imageUploading === 'comment'">选择图片上传</el-button>
+          </el-upload>
+          <div v-if="commentForm.images.length" class="form-image-grid">
+            <figure v-for="(image, index) in commentForm.images" :key="image">
+              <img
+                :src="commentPreviewImages[index]"
+                alt="评价图片"
+                @error="handleImageError($event, `comment-form-${index}`)"
+              />
+              <button type="button" @click="removeFormImage('comment', index)">移除</button>
+            </figure>
+          </div>
+          <p class="image-field-hint">最多 {{ MAX_FORM_IMAGES }} 张，提交前会自动带上输入框中尚未添加的链接。</p>
         </el-form-item>
       </el-form>
 
@@ -690,13 +903,34 @@ onMounted(loadOrder)
             placeholder="补充说明商品问题、包装情况或你的诉求"
           />
         </el-form-item>
-        <el-form-item label="凭证图片 URL">
-          <el-input
-            v-model="afterSaleForm.imagesText"
-            type="textarea"
-            :rows="3"
-            placeholder="选填，多张图片可用换行或逗号分隔"
-          />
+        <el-form-item label="凭证图片">
+          <div class="image-url-field">
+            <el-input
+              v-model="afterSaleForm.imageInput"
+              placeholder="粘贴图片 URL，可一次粘贴多条"
+              @keyup.enter="addFormImages('afterSale')"
+            />
+            <el-button @click="addFormImages('afterSale')">添加</el-button>
+          </div>
+          <el-upload
+            class="image-upload-action"
+            accept="image/*"
+            :show-file-list="false"
+            :http-request="(options) => uploadFormImage('afterSale', options)"
+          >
+            <el-button :loading="imageUploading === 'afterSale'">选择图片上传</el-button>
+          </el-upload>
+          <div v-if="afterSaleForm.images.length" class="form-image-grid">
+            <figure v-for="(image, index) in afterSaleForm.images" :key="image">
+              <img
+                :src="afterSalePreviewImages[index]"
+                alt="售后凭证"
+                @error="handleImageError($event, `after-sale-form-${index}`)"
+              />
+              <button type="button" @click="removeFormImage('afterSale', index)">移除</button>
+            </figure>
+          </div>
+          <p class="image-field-hint">商品破损、错发等问题可以上传凭证图，帮助商家更快审核。</p>
         </el-form-item>
       </el-form>
 
@@ -726,6 +960,13 @@ onMounted(loadOrder)
         <el-button type="primary" :loading="returnSubmitting" @click="submitReturnInfo">提交物流</el-button>
       </template>
     </el-dialog>
+
+    <el-image-viewer
+      v-if="previewImages.length"
+      :url-list="previewImages"
+      :initial-index="previewIndex"
+      @close="closePreview"
+    />
   </div>
 </template>
 
@@ -973,6 +1214,64 @@ onMounted(loadOrder)
   font-weight: 900;
 }
 
+.order-comment-preview {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+
+.order-comment-preview > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.order-comment-preview span {
+  color: #2f8f67;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.order-comment-preview p {
+  margin: 0;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.merchant-comment-reply {
+  padding-top: 8px;
+  border-top: 1px solid rgba(17, 24, 39, 0.06);
+  color: #6b7280 !important;
+}
+
+.comment-preview-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.comment-preview-images button {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: #eef2f7;
+  cursor: pointer;
+}
+
+.comment-preview-images img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .comment-target {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
@@ -1008,6 +1307,81 @@ onMounted(loadOrder)
   font-size: 13px;
 }
 
+.image-url-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 78px;
+  gap: 10px;
+  width: 100%;
+}
+
+.image-url-field :deep(.el-button) {
+  border-radius: 8px;
+  font-weight: 900;
+}
+
+.image-upload-action {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.image-upload-action :deep(.el-upload),
+.image-upload-action :deep(.el-button) {
+  width: 100%;
+}
+
+.image-upload-action :deep(.el-button) {
+  border-radius: 8px;
+  font-weight: 900;
+}
+
+.form-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.form-image-grid figure {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f3f4f6;
+}
+
+.form-image-grid img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.form-image-grid button {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.86);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.image-field-hint {
+  width: 100%;
+  margin: 8px 0 0;
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 :global(.comment-dialog.el-dialog) {
   width: min(520px, calc(100vw - 32px));
   border-radius: 14px;
@@ -1025,6 +1399,76 @@ onMounted(loadOrder)
 
 .after-sale-block {
   overflow: hidden;
+}
+
+.logistics-block .block-heading strong {
+  min-width: 72px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: #eef8f2;
+  color: #2f8f67;
+  font-size: 13px;
+  text-align: center;
+}
+
+.tracking-list {
+  display: grid;
+  gap: 16px;
+}
+
+.tracking-list article {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 156px;
+  gap: 14px;
+  align-items: start;
+}
+
+.tracking-list i {
+  width: 14px;
+  height: 14px;
+  margin-top: 6px;
+  border: 3px solid #d1d5db;
+  border-radius: 999px;
+}
+
+.tracking-list article.active i {
+  border-color: #e5484d;
+  background: #e5484d;
+}
+
+.tracking-list strong,
+.tracking-list span {
+  display: block;
+}
+
+.tracking-list strong {
+  color: #111827;
+}
+
+.tracking-list span {
+  margin-top: 6px;
+  color: #6b7280;
+  line-height: 1.55;
+}
+
+.tracking-list time {
+  color: #9ca3af;
+  font-size: 13px;
+  text-align: right;
+}
+
+.tracking-empty {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px dashed rgba(17, 24, 39, 0.16);
+  border-radius: 8px;
+  background: #fbfcf8;
+}
+
+.tracking-empty span {
+  color: #6b7280;
+  font-size: 13px;
 }
 
 .after-sale-list {
@@ -1091,6 +1535,30 @@ onMounted(loadOrder)
 .after-sale-card dd {
   color: #111827;
   font-weight: 800;
+}
+
+.after-sale-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.after-sale-images button {
+  width: 78px;
+  height: 78px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: #eef2f7;
+  cursor: pointer;
+}
+
+.after-sale-images img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .after-sale-actions {
@@ -1288,6 +1756,15 @@ onMounted(loadOrder)
   .after-sale-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .tracking-list article {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .tracking-list time {
+    grid-column: 2;
+    text-align: left;
   }
 
   .after-sale-actions :deep(.el-button) {

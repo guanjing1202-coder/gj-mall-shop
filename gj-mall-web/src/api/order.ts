@@ -5,6 +5,12 @@ export interface CreateOrderPayload {
   addressId: ApiId
   remark?: string
   couponId?: ApiId
+  items?: CreateOrderItemPayload[]
+}
+
+export interface CreateOrderItemPayload {
+  skuId: ApiId
+  quantity: number
 }
 
 export interface OrderQuery {
@@ -50,6 +56,24 @@ export interface OrderComment {
   replyContent?: string
   replyTime?: string
   createTime?: string
+}
+
+export interface OrderLogisticsTrace {
+  title: string
+  description?: string
+  time?: string
+  active?: boolean
+}
+
+export interface OrderLogistics {
+  orderId: ApiId
+  orderNo: string
+  status?: number
+  statusDesc?: string
+  deliveryCompany?: string
+  deliveryNo?: string
+  deliveryRemark?: string
+  traces?: OrderLogisticsTrace[]
 }
 
 export interface CreateOrderCommentPayload {
@@ -135,6 +159,10 @@ export function getOrderPage(params: OrderQuery) {
 
 export function getOrderDetail(id: ApiId) {
   return request.get<ApiResult<OrderDetail>>(`/api/order/${id}`)
+}
+
+export function getOrderLogistics(id: ApiId) {
+  return request.get<ApiResult<OrderLogistics>>(`/api/order/${id}/logistics`)
 }
 
 export function getOrderByNo(orderNo: string) {

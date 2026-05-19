@@ -11,6 +11,8 @@ export interface CartItem {
   stock?: number
   publishStatus?: number
   invalid?: boolean
+  stockEnough?: boolean
+  invalidReason?: string
   specData?: Record<string, string>
   quantity: number
   selected: number

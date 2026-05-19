@@ -56,10 +56,28 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '我的优惠券' },
   },
   {
+    path: '/favorites',
+    name: 'FavoriteList',
+    component: () => import('@/views/FavoriteListView.vue'),
+    meta: { title: '我的收藏' },
+  },
+  {
+    path: '/history',
+    name: 'HistoryList',
+    component: () => import('@/views/HistoryListView.vue'),
+    meta: { title: '浏览足迹' },
+  },
+  {
     path: '/after-sales',
     name: 'AfterSaleList',
     component: () => import('@/views/AfterSaleListView.vue'),
     meta: { title: '我的售后' },
+  },
+  {
+    path: '/addresses',
+    name: 'AddressList',
+    component: () => import('@/views/AddressListView.vue'),
+    meta: { title: '收货地址' },
   },
   {
     path: '/coupon-center',
@@ -68,10 +86,22 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '领券中心' },
   },
   {
+    path: '/seckill',
+    name: 'Seckill',
+    component: () => import('@/views/SeckillView.vue'),
+    meta: { title: '限时秒杀' },
+  },
+  {
     path: '/order/:id',
     name: 'OrderDetail',
     component: () => import('@/views/OrderDetailView.vue'),
     meta: { title: '订单详情' },
+  },
+  {
+    path: '/pay/result',
+    name: 'PayResult',
+    component: () => import('@/views/PayResultView.vue'),
+    meta: { title: '支付结果' },
   },
 ]
 

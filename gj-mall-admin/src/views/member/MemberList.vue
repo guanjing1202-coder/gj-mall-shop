@@ -9,6 +9,7 @@ import {
   updateMemberStatus,
   type ApiId,
   type MemberAddress,
+  type MemberBrowseHistory,
   type MemberQuery,
   type MemberRecord,
 } from '@/api/member'
@@ -48,6 +49,15 @@ const addressColumns: TableColumnsType<MemberAddress> = [
   { title: '地区', dataIndex: 'province', key: 'region', width: 220 },
   { title: '详细地址', dataIndex: 'detail', key: 'detail' },
   { title: '默认', dataIndex: 'isDefault', key: 'isDefault', width: 80 },
+]
+
+const historyColumns: TableColumnsType<MemberBrowseHistory> = [
+  { title: '商品', dataIndex: 'spuName', key: 'product', width: 360 },
+  { title: '品牌/分类', dataIndex: 'brandName', key: 'taxonomy', width: 180 },
+  { title: '价格', dataIndex: 'price', key: 'price', width: 120 },
+  { title: '销量', dataIndex: 'saleCount', key: 'saleCount', width: 100 },
+  { title: '状态', dataIndex: 'publishStatus', key: 'publishStatus', width: 100 },
+  { title: '浏览时间', dataIndex: 'browseTime', key: 'browseTime', width: 190 },
 ]
 
 onMounted(fetchMembers)
@@ -181,6 +191,14 @@ function statusColor(status?: number) {
   return status === 1 ? 'success' : 'default'
 }
 
+function productStatusText(status?: number) {
+  return status === 1 ? '已上架' : '已下架'
+}
+
+function productStatusColor(status?: number) {
+  return status === 1 ? 'success' : 'default'
+}
+
 function formatMoney(value?: number) {
   if (value === undefined || value === null) {
     return '¥0.00'
@@ -210,6 +228,10 @@ function toMember(record: Record<string, any>) {
 
 function toAddress(record: Record<string, any>) {
   return record as MemberAddress
+}
+
+function toHistory(record: Record<string, any>) {
+  return record as MemberBrowseHistory
 }
 </script>
 
@@ -366,6 +388,67 @@ function toAddress(record: Record<string, any>) {
               <template v-else-if="column.key === 'isDefault'">
                 <a-tag v-if="record.isDefault === 1" color="processing">默认</a-tag>
                 <span v-else>--</span>
+              </template>
+            </template>
+          </a-table>
+        </div>
+
+        <div style="margin-top: 20px">
+          <div style="display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px">
+            <h4 style="margin: 0">最近浏览足迹</h4>
+            <a-tag color="processing">共 {{ currentMember.browseHistoryTotal || 0 }} 条</a-tag>
+          </div>
+          <a-table
+            row-key="spuId"
+            size="small"
+            :columns="historyColumns"
+            :data-source="currentMember.browseHistories || []"
+            :pagination="false"
+            :scroll="{ x: 1050 }"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'product'">
+                <div style="display: flex; gap: 12px; align-items: center">
+                  <img
+                    v-if="record.mainImage"
+                    :src="record.mainImage"
+                    alt="商品图"
+                    style="width: 48px; height: 48px; border-radius: 6px; object-fit: cover; border: 1px solid #f0f0f0"
+                  />
+                  <div
+                    v-else
+                    style="width: 48px; height: 48px; border-radius: 6px; background: #f5f5f5; display: flex; align-items: center; justify-content: center; color: #999"
+                  >
+                    无图
+                  </div>
+                  <div>
+                    <div style="font-weight: 600">{{ record.spuName || '商品已删除' }}</div>
+                    <div style="font-size: 12px; color: #8c8c8c; margin-top: 4px">
+                      {{ record.subTitle || '暂无副标题' }}
+                    </div>
+                    <div style="font-size: 12px; color: #bfbfbf; margin-top: 2px">SPU {{ record.spuId }}</div>
+                  </div>
+                </div>
+              </template>
+              <template v-else-if="column.key === 'taxonomy'">
+                <div>{{ toHistory(record).brandName || '--' }}</div>
+                <div style="font-size: 12px; color: #8c8c8c; margin-top: 4px">
+                  {{ toHistory(record).categoryName || '--' }}
+                </div>
+              </template>
+              <template v-else-if="column.key === 'price'">
+                {{ formatMoney(record.price) }}
+              </template>
+              <template v-else-if="column.key === 'saleCount'">
+                {{ record.saleCount || 0 }}
+              </template>
+              <template v-else-if="column.key === 'publishStatus'">
+                <a-tag :color="productStatusColor(record.publishStatus)">
+                  {{ productStatusText(record.publishStatus) }}
+                </a-tag>
+              </template>
+              <template v-else-if="column.key === 'browseTime'">
+                {{ record.browseTime || '--' }}
               </template>
             </template>
           </a-table>

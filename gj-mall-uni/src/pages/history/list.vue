@@ -52,7 +52,7 @@ import { ref } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { clearHistory, getHistoryPage, removeHistory, type HistoryItem } from '@/api/history'
 import type { ApiId } from '@/api/product'
-import { hasLoginState } from '@/utils/auth'
+import { requireSession, syncSession } from '@/utils/session'
 
 const isLoggedIn = ref(false)
 const loading = ref(false)
@@ -63,13 +63,13 @@ const total = ref(0)
 const finished = ref(false)
 const removingId = ref('')
 
-onShow(() => {
-  isLoggedIn.value = hasLoginState()
-  if (isLoggedIn.value) {
-    refresh()
-  } else {
+onShow(async () => {
+  isLoggedIn.value = await syncSession()
+  if (!isLoggedIn.value) {
     histories.value = []
+    return
   }
+  await refresh()
 })
 
 onPullDownRefresh(async () => {
@@ -105,6 +105,7 @@ async function loadHistories(reset: boolean) {
 }
 
 async function remove(item: HistoryItem) {
+  if (!(await requireSession())) return
   removingId.value = String(item.spuId)
   try {
     await removeHistory(item.spuId)
@@ -117,6 +118,7 @@ async function remove(item: HistoryItem) {
 }
 
 async function clearAll() {
+  if (!(await requireSession())) return
   clearing.value = true
   try {
     await clearHistory()

@@ -59,7 +59,14 @@ import { getMyCoupons } from '@/api/coupon'
 import { getFavoritePage } from '@/api/favorite'
 import { getHistoryPage } from '@/api/history'
 import { getAfterSalePage, getOrderPage } from '@/api/order'
-import { clearLoginState, hasLoginState, saveLoginTokens } from '@/utils/auth'
+import { clearLoginState, hasRecoverableLoginState, saveLoginTokens } from '@/utils/auth'
+import { syncSession } from '@/utils/session'
+
+uni.$on('mall:auth-changed', (event: { loggedIn?: boolean }) => {
+  if (!event?.loggedIn) {
+    resetUserState()
+  }
+})
 
 const fallbackAvatar = 'https://picsum.photos/seed/gj-user/180/180'
 
@@ -111,14 +118,19 @@ const shortcuts = [
   { label: '确认订单', icon: '结', path: '/pages/checkout/checkout' },
 ]
 
-onShow(() => {
-  isLoggedIn.value = hasLoginState()
-  if (isLoggedIn.value) {
-    loadProfile()
-    loadStats()
-  } else {
+onShow(async () => {
+  if (!hasRecoverableLoginState()) {
     resetUserState()
+    return
   }
+  const ok = await syncSession()
+  if (!ok) {
+    resetUserState()
+    return
+  }
+  isLoggedIn.value = true
+  await loadProfile()
+  await loadStats()
 })
 
 async function submitLogin() {
@@ -147,9 +159,7 @@ async function loadProfile() {
     fillProfileForm(res.data)
     isLoggedIn.value = true
   } catch (error) {
-    if (!hasLoginState()) {
-      resetUserState()
-    }
+    resetUserState()
   }
 }
 

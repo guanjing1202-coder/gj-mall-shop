@@ -76,7 +76,7 @@ import {
   type AddressPayload,
 } from '@/api/address'
 import type { ApiId } from '@/api/product'
-import { hasLoginState } from '@/utils/auth'
+import { requireSession, syncSession } from '@/utils/session'
 
 const isLoggedIn = ref(false)
 const loading = ref(false)
@@ -96,14 +96,14 @@ const form = reactive<AddressPayload>({
   isDefault: 1,
 })
 
-onShow(() => {
-  isLoggedIn.value = hasLoginState()
-  if (isLoggedIn.value) {
-    loadAddresses()
-  } else {
+onShow(async () => {
+  isLoggedIn.value = await syncSession()
+  if (!isLoggedIn.value) {
     addresses.value = []
     dialogOpen.value = false
+    return
   }
+  await loadAddresses()
 })
 
 onPullDownRefresh(async () => {
@@ -122,6 +122,10 @@ async function loadAddresses() {
 }
 
 function openForm(address?: AddressItem) {
+  if (!isLoggedIn.value) {
+    requireSession()
+    return
+  }
   editingId.value = address?.id
   Object.assign(form, {
     receiver: address?.receiver || '',

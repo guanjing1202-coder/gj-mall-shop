@@ -55,7 +55,7 @@ import { ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { getCouponCenter, getMyCoupons, receiveCoupon, type CouponCenterItem, type MyCoupon } from '@/api/coupon'
 import type { ApiId } from '@/api/product'
-import { hasLoginState } from '@/utils/auth'
+import { requireSession, syncSession } from '@/utils/session'
 
 const tab = ref<'center' | 'mine'>('center')
 const loading = ref(false)
@@ -64,23 +64,19 @@ const receivingId = ref<ApiId>()
 const coupons = ref<CouponCenterItem[]>([])
 const myCoupons = ref<MyCoupon[]>([])
 
-onShow(() => {
+onShow(async () => {
   loadCoupons()
-  if (hasLoginState()) {
-    loadMyCoupons()
+  if (await syncSession()) {
+    await loadMyCoupons()
   } else {
     myCoupons.value = []
   }
 })
 
-watch(tab, (value) => {
+watch(tab, async (value) => {
   if (value === 'mine') {
-    if (!hasLoginState()) {
-      uni.showToast({ title: '请先登录', icon: 'none' })
-      uni.switchTab({ url: '/pages/user/user' })
-      return
-    }
-    loadMyCoupons()
+    if (!(await requireSession())) return
+    await loadMyCoupons()
   }
 })
 
@@ -105,11 +101,7 @@ async function loadMyCoupons() {
 }
 
 async function receive(id: ApiId) {
-  if (!hasLoginState()) {
-    uni.showToast({ title: '请先登录', icon: 'none' })
-    uni.switchTab({ url: '/pages/user/user' })
-    return
-  }
+  if (!(await requireSession())) return
   receivingId.value = id
   try {
     await receiveCoupon(id)

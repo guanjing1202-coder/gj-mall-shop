@@ -53,7 +53,9 @@
           <text class="muted">{{ selectedItems.length }} 件</text>
         </view>
         <view v-if="cartLoading" class="empty small">商品加载中...</view>
-        <view v-else-if="!selectedItems.length" class="empty small">{{ directBuyMode ? '直购商品加载失败' : '购物车暂无已选商品' }}</view>
+        <view v-else-if="!selectedItems.length" class="empty small">
+          {{ directBuyMode && directBuyInvalidReason ? directBuyInvalidReason : directBuyMode ? '直购商品加载失败' : '购物车暂无已选商品' }}
+        </view>
         <view v-else>
           <view v-for="item in selectedItems" :key="item.skuId" class="order-item">
             <image class="thumb" :src="normalizeImage(item.image, String(item.skuId))" mode="aspectFill" />
@@ -172,7 +174,7 @@ import { getCart, type CartInfo, type CartItem } from '@/api/cart'
 import { getAvailableCoupons, type MyCoupon } from '@/api/coupon'
 import { createOrder } from '@/api/order'
 import { getProductDetail, type ApiId } from '@/api/product'
-import { hasLoginState } from '@/utils/auth'
+import { requireSession, syncSession } from '@/utils/session'
 
 const emptyCart = (): CartInfo => ({
   items: [],
@@ -199,6 +201,7 @@ const directBuyMode = ref(false)
 const directBuySpuId = ref<ApiId>()
 const directBuySkuId = ref<ApiId>()
 const directBuyQuantity = ref(1)
+const directBuyInvalidReason = ref('')
 
 const addressForm = reactive<AddressPayload>({
   receiver: '',
@@ -226,7 +229,7 @@ onLoad((options: any) => {
 })
 
 onShow(async () => {
-  isLoggedIn.value = hasLoginState()
+  isLoggedIn.value = await syncSession()
   if (!isLoggedIn.value) {
     cart.value = emptyCart()
     addresses.value = []
@@ -247,11 +250,13 @@ async function loadCheckoutItems() {
 
 async function loadDirectBuyItem() {
   if (!directBuySpuId.value || !directBuySkuId.value) return
+  directBuyInvalidReason.value = ''
   cartLoading.value = true
   try {
     const detail = await getProductDetail(directBuySpuId.value)
     const sku = detail.data.skus?.find((candidate) => String(candidate.id) === String(directBuySkuId.value))
-    const quantity = Math.min(directBuyQuantity.value, Math.max(1, Number(sku?.stock || 1)))
+    const requestedQuantity = directBuyQuantity.value
+    const quantity = Math.min(requestedQuantity, Math.max(1, Number(sku?.stock || 1)))
     const price = Number(sku?.price || detail.data.price || 0)
     const matchedItem: CartItem | undefined = sku
       ? {
@@ -263,7 +268,16 @@ async function loadDirectBuyItem() {
           price,
           stock: Number(sku.stock || 0),
           publishStatus: detail.data.publishStatus,
-          invalid: detail.data.publishStatus !== 1 || Number(sku.stock || 0) <= 0,
+          invalid: detail.data.publishStatus !== 1 || Number(sku.stock || 0) <= 0 || requestedQuantity > Number(sku.stock || 0),
+          stockEnough: Number(sku.stock || 0) >= requestedQuantity,
+          invalidReason:
+            detail.data.publishStatus !== 1
+              ? '商品已下架'
+              : Number(sku.stock || 0) <= 0
+                ? '商品暂时无库存'
+                : requestedQuantity > Number(sku.stock || 0)
+                  ? `库存仅剩 ${sku.stock || 0} 件，请重新选择数量`
+                  : undefined,
           specData: sku.specData,
           quantity,
           selected: 1,
@@ -278,6 +292,7 @@ async function loadDirectBuyItem() {
           selectedAmount: Number(matchedItem.price || 0) * matchedItem.quantity,
         }
       : emptyCart()
+    directBuyInvalidReason.value = matchedItem?.invalidReason || ''
   } finally {
     cartLoading.value = false
   }
@@ -384,6 +399,10 @@ async function removeAddress(address: AddressItem) {
 }
 
 async function submit() {
+  if (!(await requireSession('请先登录后结算'))) {
+    isLoggedIn.value = false
+    return
+  }
   if (!selectedItems.value.length) {
     uni.showToast({ title: '请选择结算商品', icon: 'none' })
     return

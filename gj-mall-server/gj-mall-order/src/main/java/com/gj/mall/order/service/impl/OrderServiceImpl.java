@@ -165,6 +165,7 @@ public class OrderServiceImpl implements OrderService {
         return cart.getItems().stream()
                 .filter(i -> Integer.valueOf(1).equals(i.getSelected()))
                 .filter(i -> !Boolean.TRUE.equals(i.getInvalid()))
+                .filter(i -> Boolean.TRUE.equals(i.getStockEnough()))
                 .collect(Collectors.toList());
     }
 

@@ -90,6 +90,8 @@ public class CartServiceImpl implements CartService {
             if (sku == null) {
                 // SKU 已删除
                 vo.setInvalid(true);
+                vo.setStockEnough(false);
+                vo.setInvalidReason("商品已删除或下架");
                 vo.setSkuName("商品已下架");
                 vo.setPrice(BigDecimal.ZERO);
                 vo.setTotalAmount(BigDecimal.ZERO);
@@ -111,18 +113,27 @@ public class CartServiceImpl implements CartService {
                 vo.setPublishStatus(spu.getPublishStatus());
                 if (vo.getImage() == null) vo.setImage(spu.getMainImage());
             }
-            // 失效判定：SPU 不存在或已下架或库存为 0
-            boolean invalid = spu == null
-                    || !Integer.valueOf(1).equals(spu.getPublishStatus())
-                    || sku.getStock() == null || sku.getStock() <= 0;
+            int quantity = l.quantity == null ? 0 : l.quantity;
+            int stock = sku.getStock() == null ? 0 : sku.getStock();
+            boolean offShelf = spu == null || !Integer.valueOf(1).equals(spu.getPublishStatus());
+            boolean stockEnough = stock >= quantity && quantity > 0;
+            boolean invalid = offShelf || !stockEnough;
             vo.setInvalid(invalid);
+            vo.setStockEnough(stockEnough);
+            if (offShelf) {
+                vo.setInvalidReason("商品已下架");
+            } else if (stock <= 0) {
+                vo.setInvalidReason("商品暂时无库存");
+            } else if (!stockEnough) {
+                vo.setInvalidReason("库存仅剩 " + stock + " 件，请调整数量");
+            }
 
-            BigDecimal lineTotal = sku.getPrice().multiply(BigDecimal.valueOf(l.quantity));
+            BigDecimal lineTotal = sku.getPrice().multiply(BigDecimal.valueOf(quantity));
             vo.setTotalAmount(lineTotal);
 
-            totalCount += l.quantity;
+            totalCount += quantity;
             if (!invalid && Integer.valueOf(1).equals(vo.getSelected())) {
-                selectedCount += l.quantity;
+                selectedCount += quantity;
                 selectedAmount = selectedAmount.add(lineTotal);
             }
             items.add(vo);

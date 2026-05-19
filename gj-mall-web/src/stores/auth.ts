@@ -39,6 +39,11 @@ export const useAuthStore = defineStore('mall-auth', {
     closeLoginDialog() {
       this.loginDialogOpen = false
     },
+    hydrateSessionFromStorage() {
+      this.token = localStorage.getItem('mall_token') || ''
+      this.refreshToken = localStorage.getItem('mall_refresh_token') || ''
+      this.user = readStoredUser()
+    },
     setSession(accessToken: string, refreshToken: string, user: UserProfile) {
       this.token = accessToken
       this.refreshToken = refreshToken

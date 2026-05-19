@@ -1,7 +1,7 @@
 /**
  * 统一请求封装（uni.request）
  */
-import { clearLoginState, getAccessToken, getRefreshToken, saveLoginTokens } from './auth'
+import { clearLoginState, getAccessToken, getRefreshToken, isTokenExpired, saveLoginTokens } from './auth'
 
 // #ifdef H5
 const BASE_URL = '' // dev 走 vite 代理；生产改为后端地址
@@ -25,9 +25,24 @@ export interface ApiResult<T = any> {
 }
 
 let refreshing: Promise<string | null> | null = null
+let lastExpiredNoticeAt = 0
 
 export function request<T = any>(opts: RequestOptions): Promise<ApiResult<T>> {
   return doRequest<T>(opts, true)
+}
+
+export async function ensureSession(options: { showToast?: boolean; redirect?: boolean } = {}): Promise<boolean> {
+  const token = getAccessToken()
+  if (token && !isTokenExpired(token)) return true
+
+  const refreshToken = getRefreshToken()
+  if (!refreshToken || isTokenExpired(refreshToken, 0)) {
+    handleAuthExpired(options)
+    return false
+  }
+
+  const newToken = await refreshAccessToken(options)
+  return Boolean(newToken)
 }
 
 function doRequest<T = any>(opts: RequestOptions, allowRefresh: boolean): Promise<ApiResult<T>> {
@@ -51,7 +66,7 @@ function doRequest<T = any>(opts: RequestOptions, allowRefresh: boolean): Promis
           if (body && body.code === 200) {
             resolve(body)
           } else if (allowRefresh && shouldRefresh(body)) {
-            refreshAccessToken()
+            refreshAccessToken({ showToast: true, redirect: true })
               .then((newToken) => {
                 if (!newToken) {
                   reject(body)
@@ -82,11 +97,11 @@ function shouldRefresh(body?: ApiResult<any>) {
   return body?.code === 2001 || body?.code === 2006 || body?.code === 2007
 }
 
-function refreshAccessToken(): Promise<string | null> {
+function refreshAccessToken(options: { showToast?: boolean; redirect?: boolean } = {}): Promise<string | null> {
   if (refreshing) return refreshing
   const refreshToken = getRefreshToken()
-  if (!refreshToken) {
-    handleAuthExpired()
+  if (!refreshToken || isTokenExpired(refreshToken, 0)) {
+    handleAuthExpired(options)
     return Promise.resolve(null)
   }
   refreshing = new Promise((resolve) => {
@@ -103,12 +118,12 @@ function refreshAccessToken(): Promise<string | null> {
           saveLoginTokens(body.data.accessToken, body.data.refreshToken)
           resolve(body.data.accessToken)
         } else {
-          handleAuthExpired()
+          handleAuthExpired(options)
           resolve(null)
         }
       },
       fail: () => {
-        handleAuthExpired()
+        handleAuthExpired(options)
         resolve(null)
       },
       complete: () => {
@@ -119,12 +134,22 @@ function refreshAccessToken(): Promise<string | null> {
   return refreshing
 }
 
-function handleAuthExpired() {
+function handleAuthExpired(options: { showToast?: boolean; redirect?: boolean } = {}) {
+  const showToast = options.showToast !== false
+  const redirect = options.redirect !== false
   clearLoginState()
-  uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
-  setTimeout(() => {
-    uni.switchTab({ url: '/pages/user/user' })
-  }, 500)
+  if (showToast) {
+    const now = Date.now()
+    if (now - lastExpiredNoticeAt > 1500) {
+      lastExpiredNoticeAt = now
+      uni.showToast({ title: '登录已过期，请重新登录', icon: 'none' })
+    }
+  }
+  if (redirect) {
+    setTimeout(() => {
+      uni.switchTab({ url: '/pages/user/user' })
+    }, 500)
+  }
 }
 
 function getClientType(): string {

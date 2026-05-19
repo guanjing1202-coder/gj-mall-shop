@@ -49,7 +49,7 @@ import { ref } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { getFavoritePage, removeFavorite, type FavoriteItem } from '@/api/favorite'
 import type { ApiId } from '@/api/product'
-import { hasLoginState } from '@/utils/auth'
+import { requireSession, syncSession } from '@/utils/session'
 
 const isLoggedIn = ref(false)
 const loading = ref(false)
@@ -59,13 +59,13 @@ const total = ref(0)
 const finished = ref(false)
 const removingId = ref('')
 
-onShow(() => {
-  isLoggedIn.value = hasLoginState()
-  if (isLoggedIn.value) {
-    refresh()
-  } else {
+onShow(async () => {
+  isLoggedIn.value = await syncSession()
+  if (!isLoggedIn.value) {
     favorites.value = []
+    return
   }
+  await refresh()
 })
 
 onPullDownRefresh(async () => {
@@ -101,6 +101,7 @@ async function loadFavorites(reset: boolean) {
 }
 
 async function remove(item: FavoriteItem) {
+  if (!(await requireSession())) return
   removingId.value = String(item.spuId)
   try {
     await removeFavorite(item.spuId)

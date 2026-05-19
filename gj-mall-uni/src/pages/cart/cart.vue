@@ -37,7 +37,7 @@
               </view>
             </view>
             <view class="item-actions">
-              <text v-if="item.invalid">商品已失效</text>
+              <text v-if="item.invalid">{{ item.invalidReason || '商品已失效' }}</text>
               <text v-else>库存 {{ item.stock ?? 0 }}</text>
               <button @tap="removeItem(item)">删除</button>
             </view>
@@ -72,7 +72,7 @@ import {
   type CartInfo,
   type CartItem,
 } from '@/api/cart'
-import { hasLoginState } from '@/utils/auth'
+import { syncSession } from '@/utils/session'
 
 const emptyCart = (): CartInfo => ({
   items: [],
@@ -90,13 +90,13 @@ const allSelected = computed(() => {
   return Boolean(validItems.length) && validItems.every((item) => item.selected === 1)
 })
 
-onShow(() => {
-  isLoggedIn.value = hasLoginState()
-  if (isLoggedIn.value) {
-    loadCart()
-  } else {
+onShow(async () => {
+  isLoggedIn.value = await syncSession()
+  if (!isLoggedIn.value) {
     cart.value = emptyCart()
+    return
   }
+  await loadCart()
 })
 
 async function loadCart() {

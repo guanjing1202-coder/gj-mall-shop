@@ -37,3 +37,10 @@ export function login(data: AdminLoginParams) {
 export function logout() {
   return request.post<ApiResult<void>>('/api/admin/auth/logout')
 }
+
+export function refreshAdminToken(refreshToken: string) {
+  return request.post<ApiResult<AdminLoginData>>('/api/admin/auth/refresh', undefined, {
+    params: { refreshToken },
+    skipAuthRefresh: true,
+  } as any)
+}
