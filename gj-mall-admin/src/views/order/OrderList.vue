@@ -355,6 +355,12 @@ function payTypeLabel(payType?: number) {
   return payType === undefined || payType === null ? '--' : map[payType] || `渠道 ${payType}`
 }
 
+function invoiceTypeLabel(type?: number) {
+  if (type === 1) return '个人发票'
+  if (type === 2) return '企业发票'
+  return '不开发票'
+}
+
 function fulfillmentSteps(record?: OrderRecord) {
   const status = Number(record?.status ?? 0)
   const closed = status === 4 || status === 6
@@ -681,6 +687,24 @@ function toOrder(record: Record<string, any>) {
           <a-descriptions-item label="手机号">{{ currentOrder.receiver?.phone || '--' }}</a-descriptions-item>
           <a-descriptions-item label="邮编">{{ currentOrder.receiver?.postCode || '--' }}</a-descriptions-item>
           <a-descriptions-item label="地址">{{ formatAddress(currentOrder) }}</a-descriptions-item>
+        </a-descriptions>
+      </div>
+
+      <div style="margin-top: 20px">
+        <h4 style="margin-bottom: 12px">发票信息</h4>
+        <a-descriptions :column="2" bordered size="small">
+          <a-descriptions-item label="发票类型">{{ invoiceTypeLabel(currentOrder.invoice?.type) }}</a-descriptions-item>
+          <template v-if="currentOrder.invoice">
+            <a-descriptions-item label="发票抬头">{{ currentOrder.invoice.title || '--' }}</a-descriptions-item>
+            <a-descriptions-item v-if="currentOrder.invoice.type === 2" label="纳税人识别号">
+              {{ currentOrder.invoice.taxNo || '--' }}
+            </a-descriptions-item>
+            <a-descriptions-item label="接收邮箱">{{ currentOrder.invoice.email || '--' }}</a-descriptions-item>
+            <a-descriptions-item label="发票内容">{{ currentOrder.invoice.content || '商品明细' }}</a-descriptions-item>
+          </template>
+          <template v-else>
+            <a-descriptions-item label="说明">本单未申请发票</a-descriptions-item>
+          </template>
         </a-descriptions>
       </div>
 

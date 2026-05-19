@@ -18,6 +18,13 @@ export interface LogisticsSummary {
   receivedTodayCount?: number
   activeCompanyCount?: number
   pendingDeliveryAmount?: number
+  pendingReceiveAmount?: number
+  shippedTodayAmount?: number
+  receivedTodayAmount?: number
+  overdueDeliveryCount?: number
+  overdueReceiveCount?: number
+  overdueDeliveryAmount?: number
+  overdueReceiveAmount?: number
 }
 
 export interface DeliveryCompanyQuery {

@@ -3,6 +3,7 @@ package com.gj.mall.admin.service.impl;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson2.JSON;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -10,6 +11,7 @@ import com.gj.mall.admin.dto.AdminAfterSaleActionDTO;
 import com.gj.mall.admin.dto.AdminAfterSaleCreateDTO;
 import com.gj.mall.admin.dto.AdminAfterSaleQueryDTO;
 import com.gj.mall.admin.service.AdminAfterSaleService;
+import com.gj.mall.admin.vo.AdminAfterSaleSummaryVO;
 import com.gj.mall.admin.vo.AdminAfterSaleVO;
 import com.gj.mall.common.enums.ResultCode;
 import com.gj.mall.common.exception.BizException;
@@ -25,11 +27,14 @@ import com.gj.mall.order.mapper.OmsOrderMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.mapper.UmsUserMapper;
+import com.gj.mall.user.service.UserMessageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -54,6 +59,42 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
     private final OmsOrderItemMapper orderItemMapper;
     private final PayPaymentRecordMapper paymentRecordMapper;
     private final UmsUserMapper userMapper;
+    private final UserMessageService messageService;
+
+    @Override
+    public AdminAfterSaleSummaryVO summary() {
+        LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+        LocalDateTime tomorrowStart = todayStart.plusDays(1);
+
+        AdminAfterSaleSummaryVO vo = new AdminAfterSaleSummaryVO();
+        vo.setTotalCount(countByStatus(null));
+        vo.setTotalAmount(sumAmount(null, null, null, null));
+        vo.setPendingCount(countByStatus(STATUS_PENDING));
+        vo.setPendingAmount(sumAmount(STATUS_PENDING, null, null, null));
+        vo.setWaitReturnCount(countByStatus(STATUS_WAIT_RETURN));
+        vo.setWaitReturnAmount(sumAmount(STATUS_WAIT_RETURN, null, null, null));
+        vo.setWaitRefundCount(countByStatus(STATUS_WAIT_REFUND));
+        vo.setWaitRefundAmount(sumAmount(STATUS_WAIT_REFUND, null, null, null));
+        vo.setRejectedCount(countByStatus(STATUS_REJECTED));
+        vo.setRejectedAmount(sumAmount(STATUS_REJECTED, null, null, null));
+        vo.setCompletedCount(countByStatus(STATUS_COMPLETED));
+        vo.setCompletedAmount(sumAmount(STATUS_COMPLETED, null, null, null));
+        vo.setCanceledCount(countByStatus(STATUS_CANCELED));
+        vo.setCanceledAmount(sumAmount(STATUS_CANCELED, null, null, null));
+        vo.setProcessingCount(safeLong(vo.getPendingCount()) + safeLong(vo.getWaitReturnCount()) + safeLong(vo.getWaitRefundCount()));
+        vo.setProcessingAmount(safeAmount(vo.getPendingAmount())
+                .add(safeAmount(vo.getWaitReturnAmount()))
+                .add(safeAmount(vo.getWaitRefundAmount())));
+        vo.setTodayNewCount(countByStatusAndTime(null, "create_time", todayStart, tomorrowStart));
+        vo.setTodayNewAmount(sumAmount(null, "create_time", todayStart, tomorrowStart));
+        vo.setTodayRefundedCount(countByStatusAndTime(STATUS_COMPLETED, "refund_time", todayStart, tomorrowStart));
+        vo.setTodayRefundedAmount(sumAmount(STATUS_COMPLETED, "refund_time", todayStart, tomorrowStart));
+        Long effectiveCount = safeLong(vo.getTotalCount()) - safeLong(vo.getCanceledCount());
+        vo.setCompletionRate(percent(vo.getCompletedCount(), effectiveCount));
+        vo.setRejectionRate(percent(vo.getRejectedCount(), effectiveCount));
+        vo.setTypes(buildTypeSummary());
+        return vo;
+    }
 
     @Override
     public PageResult<AdminAfterSaleVO> page(AdminAfterSaleQueryDTO query) {
@@ -123,6 +164,7 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         afterSaleMapper.insert(afterSale);
 
         updateOrderStatus(order.getId(), OrderStatus.REFUNDING.getCode());
+        notifyUser(order.getUserId(), "after_sale", "商家创建了售后单", "商家为订单 " + order.getOrderNo() + " 创建了售后单，请关注处理进度。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
         return afterSale.getId();
     }
 
@@ -141,6 +183,7 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         update.setAuditRemark(dto == null ? null : dto.getAuditRemark());
         update.setAuditTime(LocalDateTime.now());
         afterSaleMapper.updateById(update);
+        notifyUser(afterSale.getUserId(), "after_sale", "售后审核通过", "售后单 " + afterSale.getAfterSaleNo() + " 已审核通过，请按页面提示继续处理。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
     }
 
     @Override
@@ -158,6 +201,7 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         update.setAuditTime(LocalDateTime.now());
         afterSaleMapper.updateById(update);
         restoreOrderStatus(afterSale);
+        notifyUser(afterSale.getUserId(), "after_sale", "售后审核未通过", "售后单 " + afterSale.getAfterSaleNo() + " 未通过审核，可查看原因或联系商家。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
     }
 
     @Override
@@ -174,6 +218,7 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         update.setReturnNo(dto == null ? null : dto.getReturnNo());
         update.setReceiveTime(LocalDateTime.now());
         afterSaleMapper.updateById(update);
+        notifyUser(afterSale.getUserId(), "after_sale", "退货已确认收货", "售后单 " + afterSale.getAfterSaleNo() + " 的退货已确认收货，等待退款。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
     }
 
     @Override
@@ -214,6 +259,7 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         update.setRefundTime(LocalDateTime.now());
         afterSaleMapper.updateById(update);
         updateOrderStatus(order.getId(), OrderStatus.REFUNDED.getCode());
+        notifyUser(afterSale.getUserId(), "after_sale", "退款已完成", "售后单 " + afterSale.getAfterSaleNo() + " 已完成退款，退款金额 ¥" + afterSale.getAmount() + "。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
     }
 
     @Override
@@ -231,6 +277,7 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         update.setAuditRemark(dto == null ? null : dto.getAuditRemark());
         afterSaleMapper.updateById(update);
         restoreOrderStatus(afterSale);
+        notifyUser(afterSale.getUserId(), "after_sale", "售后单已取消", "售后单 " + afterSale.getAfterSaleNo() + " 已取消，订单状态已恢复。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
     }
 
     private OmsAfterSale getByIdOrThrow(Long id) {
@@ -239,6 +286,115 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
             throw new BizException(ResultCode.DATA_NOT_FOUND, "售后单不存在");
         }
         return afterSale;
+    }
+
+    private Long countByStatus(Integer status) {
+        return afterSaleMapper.selectCount(Wrappers.<OmsAfterSale>lambdaQuery()
+                .eq(status != null, OmsAfterSale::getStatus, status));
+    }
+
+    private Long countByStatusAndTime(Integer status, String timeColumn, LocalDateTime start, LocalDateTime end) {
+        QueryWrapper<OmsAfterSale> wrapper = Wrappers.query();
+        wrapper.eq(status != null, "status", status);
+        if (StrUtil.isNotBlank(timeColumn)) {
+            if (start != null) {
+                wrapper.ge(timeColumn, start);
+            }
+            if (end != null) {
+                wrapper.lt(timeColumn, end);
+            }
+        }
+        return afterSaleMapper.selectCount(wrapper);
+    }
+
+    private BigDecimal sumAmount(Integer status, String timeColumn, LocalDateTime start, LocalDateTime end) {
+        QueryWrapper<OmsAfterSale> wrapper = Wrappers.query();
+        wrapper.select("COALESCE(SUM(amount), 0)");
+        wrapper.eq(status != null, "status", status);
+        if (StrUtil.isNotBlank(timeColumn)) {
+            if (start != null) {
+                wrapper.ge(timeColumn, start);
+            }
+            if (end != null) {
+                wrapper.lt(timeColumn, end);
+            }
+        }
+        List<Object> rows = afterSaleMapper.selectObjs(wrapper);
+        if (rows == null || rows.isEmpty() || rows.get(0) == null) {
+            return BigDecimal.ZERO;
+        }
+        return toBigDecimal(rows.get(0));
+    }
+
+    private List<AdminAfterSaleSummaryVO.TypeItem> buildTypeSummary() {
+        Map<Integer, AdminAfterSaleSummaryVO.TypeItem> typeMap = new LinkedHashMap<>();
+        typeMap.put(TYPE_REFUND_ONLY, AdminAfterSaleSummaryVO.TypeItem.empty(TYPE_REFUND_ONLY, "仅退款"));
+        typeMap.put(TYPE_RETURN_REFUND, AdminAfterSaleSummaryVO.TypeItem.empty(TYPE_RETURN_REFUND, "退货退款"));
+
+        QueryWrapper<OmsAfterSale> wrapper = Wrappers.query();
+        wrapper.select("type, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount");
+        wrapper.groupBy("type");
+        List<Map<String, Object>> rows = afterSaleMapper.selectMaps(wrapper);
+        for (Map<String, Object> row : rows) {
+            Integer type = toInteger(row.get("type"));
+            if (type == null) {
+                continue;
+            }
+            AdminAfterSaleSummaryVO.TypeItem item = typeMap.computeIfAbsent(type,
+                    key -> AdminAfterSaleSummaryVO.TypeItem.empty(key, "未知类型"));
+            item.setCount(toLong(row.get("count")));
+            item.setAmount(toBigDecimal(row.get("amount")));
+        }
+        return new ArrayList<>(typeMap.values());
+    }
+
+    private BigDecimal percent(Long numerator, Long denominator) {
+        long down = denominator == null ? 0L : denominator;
+        if (down <= 0) {
+            return BigDecimal.ZERO;
+        }
+        long up = numerator == null ? 0L : numerator;
+        return BigDecimal.valueOf(up)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(down), 2, RoundingMode.HALF_UP);
+    }
+
+    private long safeLong(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private BigDecimal safeAmount(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private Long toLong(Object value) {
+        if (value == null) {
+            return 0L;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        return Long.parseLong(value.toString());
+    }
+
+    private Integer toInteger(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        return Integer.parseInt(value.toString());
+    }
+
+    private BigDecimal toBigDecimal(Object value) {
+        if (value == null) {
+            return BigDecimal.ZERO;
+        }
+        if (value instanceof BigDecimal) {
+            return (BigDecimal) value;
+        }
+        return new BigDecimal(value.toString());
     }
 
     private OmsOrder getOrderOrThrow(Long id) {
@@ -322,5 +478,12 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
     private String appendCallback(String source, String text) {
         String line = "[" + LocalDateTime.now() + "] " + text;
         return StrUtil.isBlank(source) ? line : source + "\n" + line;
+    }
+
+    private void notifyUser(Long userId, String type, String title, String content, String bizType, Long bizId, String bizNo) {
+        try {
+            messageService.create(userId, type, title, content, bizType, bizId, bizNo);
+        } catch (Exception ignored) {
+        }
     }
 }

@@ -34,6 +34,11 @@ public class DashboardBusinessVO {
     private BigDecimal paidAmountTotal = BigDecimal.ZERO;
     private BigDecimal todayPaidAmount = BigDecimal.ZERO;
     private BigDecimal pendingDeliveryAmount = BigDecimal.ZERO;
+    private BigDecimal paidConversionRate = BigDecimal.ZERO;
+    private BigDecimal averageOrderAmount = BigDecimal.ZERO;
+    private BigDecimal refundAmountTotal = BigDecimal.ZERO;
+    private BigDecimal todayRefundAmount = BigDecimal.ZERO;
+    private BigDecimal refundRate = BigDecimal.ZERO;
 
     private Long pendingAfterSaleCount;
     private Long pendingCommentCount;

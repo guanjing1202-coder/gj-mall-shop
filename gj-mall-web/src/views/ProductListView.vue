@@ -6,11 +6,15 @@ import {
   getBrandList,
   getCategoryTree,
   getProductPage,
+  getSearchHotWords,
+  getSearchSuggestions,
   type ApiId,
   type BrandItem,
   type CategoryItem,
   type ProductItem,
   type ProductQuery,
+  type SearchHotWord,
+  type SearchSuggestItem,
 } from '@/api/product'
 
 const route = useRoute()
@@ -22,6 +26,11 @@ const brands = ref<BrandItem[]>([])
 const products = ref<ProductItem[]>([])
 const total = ref(0)
 const initialized = ref(false)
+const hotWords = ref<SearchHotWord[]>([])
+const suggestions = ref<SearchSuggestItem[]>([])
+const searchHistory = ref<string[]>([])
+const searchFocused = ref(false)
+let suggestTimer: number | undefined
 
 const query = reactive<ProductQuery>({
   current: 1,
@@ -50,6 +59,7 @@ const categoryList = computed(() => {
 const selectedCategory = computed(() => categoryList.value.find((item) => String(item.id) === String(query.categoryId)))
 const selectedBrand = computed(() => brands.value.find((item) => String(item.id) === String(query.brandId)))
 const pageCount = computed(() => Math.max(1, Math.ceil(total.value / Number(query.size || 12))))
+const showSuggestPanel = computed(() => searchFocused.value && Boolean(query.keyword?.trim()) && suggestions.value.length > 0)
 
 function numberValue(value?: string | number) {
   const parsed = Number(value || 0)
@@ -106,6 +116,8 @@ function buildRouteQuery(overrides: Partial<ProductQuery> = {}) {
 }
 
 function pushQuery(overrides: Partial<ProductQuery> = {}) {
+  const keyword = overrides.keyword ?? query.keyword
+  saveSearchHistory(keyword)
   router.push({ path: '/products', query: buildRouteQuery(overrides) })
 }
 
@@ -149,6 +161,12 @@ async function loadFilters() {
   const [categoryRes, brandRes] = await Promise.all([getCategoryTree(), getBrandList()])
   categories.value = categoryRes.data || []
   brands.value = brandRes.data || []
+}
+
+async function loadSearchMeta() {
+  searchHistory.value = readSearchHistory()
+  const res = await getSearchHotWords(12)
+  hotWords.value = res.data || []
 }
 
 function formatPrice(value?: number) {
@@ -199,6 +217,55 @@ function search() {
   pushQuery({ current: 1 })
 }
 
+function readSearchHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('gj_mall_search_history') || '[]') as string[]
+    return Array.isArray(parsed) ? parsed.filter(Boolean).slice(0, 8) : []
+  } catch {
+    return []
+  }
+}
+
+function saveSearchHistory(keyword?: string) {
+  const value = keyword?.trim()
+  if (!value) return
+  const next = [value, ...readSearchHistory().filter((item) => item !== value)].slice(0, 8)
+  searchHistory.value = next
+  localStorage.setItem('gj_mall_search_history', JSON.stringify(next))
+}
+
+function clearSearchHistory() {
+  searchHistory.value = []
+  localStorage.removeItem('gj_mall_search_history')
+}
+
+function requestSuggest() {
+  if (suggestTimer) {
+    window.clearTimeout(suggestTimer)
+  }
+  suggestTimer = window.setTimeout(async () => {
+    const keyword = query.keyword?.trim() || ''
+    if (!keyword) {
+      suggestions.value = []
+      return
+    }
+    const res = await getSearchSuggestions(keyword, 10)
+    suggestions.value = res.data || []
+  }, 180)
+}
+
+function handleSearchBlur() {
+  window.setTimeout(() => {
+    searchFocused.value = false
+  }, 160)
+}
+
+function pickKeyword(keyword: string) {
+  query.keyword = keyword
+  searchFocused.value = false
+  pushQuery({ keyword, current: 1 })
+}
+
 function changeSort() {
   pushQuery({ current: 1 })
 }
@@ -246,7 +313,7 @@ watch(
 
 onMounted(async () => {
   syncFromRoute()
-  await Promise.all([loadFilters(), loadProducts()])
+  await Promise.all([loadFilters(), loadProducts(), loadSearchMeta()])
   initialized.value = true
 })
 </script>
@@ -266,16 +333,46 @@ onMounted(async () => {
       </section>
 
       <section class="search-panel">
-        <div class="search-line">
-          <el-input
-            v-model="query.keyword"
-            size="large"
-            clearable
-            placeholder="搜索手机、耳机、护肤、运动鞋"
-            @keyup.enter="search"
-            @clear="search"
-          />
-          <el-button size="large" type="primary" @click="search">搜索</el-button>
+        <div class="search-line-wrap">
+          <div class="search-line">
+            <el-input
+              v-model="query.keyword"
+              size="large"
+              clearable
+              placeholder="搜索手机、耳机、护肤、运动鞋"
+              @focus="searchFocused = true"
+              @blur="handleSearchBlur"
+              @input="requestSuggest"
+              @keyup.enter="search"
+              @clear="search"
+            />
+            <el-button size="large" type="primary" @click="search">搜索</el-button>
+          </div>
+          <div v-if="showSuggestPanel" class="suggest-list">
+            <button
+              v-for="item in suggestions"
+              :key="`${item.type}-${item.keyword}`"
+              type="button"
+              @mousedown.prevent="pickKeyword(item.keyword)"
+            >
+              <span>{{ item.keyword }}</span>
+              <small>{{ item.label || '搜索建议' }}</small>
+            </button>
+          </div>
+        </div>
+
+        <div class="search-discovery">
+          <div v-if="searchHistory.length" class="discovery-group">
+            <span>历史</span>
+            <button v-for="item in searchHistory" :key="item" type="button" @click="pickKeyword(item)">{{ item }}</button>
+            <button class="clear-history" type="button" @click="clearSearchHistory">清空</button>
+          </div>
+          <div v-if="hotWords.length" class="discovery-group">
+            <span>热搜</span>
+            <button v-for="item in hotWords.slice(0, 8)" :key="item.keyword" type="button" @click="pickKeyword(item.keyword)">
+              {{ item.keyword }}
+            </button>
+          </div>
         </div>
 
         <div class="active-tags">
@@ -482,6 +579,10 @@ onMounted(async () => {
   padding: 18px;
 }
 
+.search-line-wrap {
+  position: relative;
+}
+
 .search-line {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -500,6 +601,87 @@ onMounted(async () => {
 .product-grid :deep(.el-button--primary) {
   background: #e5484d;
   border-color: #e5484d;
+}
+
+.suggest-list {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 108px;
+  left: 0;
+  z-index: 6;
+  padding: 10px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.14);
+}
+
+.suggest-list button,
+.discovery-group button {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.suggest-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: #111827;
+  font-weight: 800;
+}
+
+.suggest-list button:hover {
+  background: #f3f4f6;
+}
+
+.suggest-list small {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.search-discovery {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.discovery-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.discovery-group span {
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.discovery-group button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.discovery-group button:hover {
+  background: rgba(47, 143, 103, 0.12);
+  color: #2f8f67;
+}
+
+.discovery-group .clear-history {
+  background: transparent;
+  color: #9ca3af;
 }
 
 .active-tags {

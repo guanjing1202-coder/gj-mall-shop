@@ -6,11 +6,15 @@ import {
   getBrandList,
   getCategoryTree,
   getProductPage,
+  getSearchHotWords,
+  getSearchSuggestions,
   type ApiId,
   type BrandItem,
   type CategoryItem,
   type ProductItem,
   type ProductQuery,
+  type SearchHotWord,
+  type SearchSuggestItem,
 } from '@/api/product'
 
 const router = useRouter()
@@ -20,6 +24,10 @@ const products = ref<ProductItem[]>([])
 const categories = ref<CategoryItem[]>([])
 const brands = ref<BrandItem[]>([])
 const total = ref(0)
+const hotWords = ref<SearchHotWord[]>([])
+const suggestions = ref<SearchSuggestItem[]>([])
+const searchFocused = ref(false)
+let suggestTimer: number | undefined
 
 const query = reactive<ProductQuery>({
   current: 1,
@@ -43,6 +51,7 @@ const heroProduct = computed(() => products.value[0])
 const heroSideProducts = computed(() => products.value.slice(1, 4))
 const recommendedProducts = computed(() => products.value.slice(0, 4))
 const brandStrip = computed(() => brands.value.slice(0, 8))
+const showSuggestPanel = computed(() => searchFocused.value && Boolean(suggestions.value.length || hotWords.value.length))
 
 function toNumber(value?: string | number) {
   const parsed = Number(value || 0)
@@ -95,11 +104,22 @@ async function loadProducts() {
   }
 }
 
+function saveSearchHistory(keyword?: string) {
+  const value = keyword?.trim()
+  if (!value) return
+  const key = 'gj_mall_search_history'
+  const current = JSON.parse(localStorage.getItem(key) || '[]') as string[]
+  const next = [value, ...current.filter((item) => item !== value)].slice(0, 8)
+  localStorage.setItem(key, JSON.stringify(next))
+}
+
 function goProducts(overrides: Partial<ProductQuery> = {}) {
+  const keyword = overrides.keyword?.trim() || query.keyword?.trim() || ''
+  saveSearchHistory(keyword)
   router.push({
     path: '/products',
     query: {
-      keyword: overrides.keyword?.trim() || query.keyword?.trim() || undefined,
+      keyword: keyword || undefined,
       categoryId: overrides.categoryId || undefined,
       brandId: overrides.brandId || undefined,
       newStatus: overrides.newStatus,
@@ -115,12 +135,44 @@ async function loadFilters() {
   brands.value = brandRes.data || []
 }
 
+async function loadSearchMeta() {
+  const res = await getSearchHotWords(10)
+  hotWords.value = res.data || []
+}
+
+function requestSuggest() {
+  if (suggestTimer) {
+    window.clearTimeout(suggestTimer)
+  }
+  suggestTimer = window.setTimeout(async () => {
+    const keyword = query.keyword?.trim() || ''
+    if (!keyword) {
+      suggestions.value = []
+      return
+    }
+    const res = await getSearchSuggestions(keyword, 8)
+    suggestions.value = res.data || []
+  }, 180)
+}
+
+function handleSearchBlur() {
+  window.setTimeout(() => {
+    searchFocused.value = false
+  }, 160)
+}
+
+function pickKeyword(keyword: string) {
+  query.keyword = keyword
+  searchFocused.value = false
+  goProducts({ keyword })
+}
+
 function goProduct(product: ProductItem) {
   router.push({ name: 'ProductDetail', params: { id: product.id } })
 }
 
 onMounted(async () => {
-  await Promise.all([loadFilters(), loadProducts()])
+  await Promise.all([loadFilters(), loadProducts(), loadSearchMeta()])
 })
 </script>
 
@@ -135,16 +187,51 @@ onMounted(async () => {
           <h1>把值得买的商品摆到最前面</h1>
           <p>真实接口驱动的商品浏览入口，支持分类、品牌、搜索和排序。</p>
 
-          <div class="hero-search">
-            <el-input
-              v-model="query.keyword"
-              clearable
-              size="large"
-              placeholder="搜索手机、耳机、护肤、运动鞋"
-              @keyup.enter="goProducts()"
-              @clear="loadProducts"
-            />
-            <el-button size="large" type="primary" @click="goProducts()">搜索</el-button>
+          <div class="hero-search-wrap">
+            <div class="hero-search">
+              <el-input
+                v-model="query.keyword"
+                clearable
+                size="large"
+                placeholder="搜索手机、耳机、护肤、运动鞋"
+                @focus="searchFocused = true"
+                @blur="handleSearchBlur"
+                @input="requestSuggest"
+                @keyup.enter="goProducts()"
+                @clear="suggestions = []"
+              />
+              <el-button size="large" type="primary" @click="goProducts()">搜索</el-button>
+            </div>
+            <div v-if="showSuggestPanel" class="search-suggest-panel">
+              <template v-if="query.keyword?.trim() && suggestions.length">
+                <button
+                  v-for="item in suggestions"
+                  :key="`${item.type}-${item.keyword}`"
+                  type="button"
+                  @mousedown.prevent="pickKeyword(item.keyword)"
+                >
+                  <span>{{ item.keyword }}</span>
+                  <small>{{ item.label || '搜索建议' }}</small>
+                </button>
+              </template>
+              <div v-else class="hot-word-row">
+                <button
+                  v-for="item in hotWords.slice(0, 8)"
+                  :key="item.keyword"
+                  type="button"
+                  @mousedown.prevent="pickKeyword(item.keyword)"
+                >
+                  {{ item.keyword }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="hotWords.length" class="hero-hotwords">
+            <span>热搜</span>
+            <button v-for="item in hotWords.slice(0, 6)" :key="item.keyword" type="button" @click="pickKeyword(item.keyword)">
+              {{ item.keyword }}
+            </button>
           </div>
 
           <div class="hero-metrics">
@@ -426,13 +513,17 @@ main {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px;
-  max-width: 560px;
-  margin-top: 30px;
   padding: 8px;
   border: 1px solid rgba(17, 24, 39, 0.06);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.82);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.hero-search-wrap {
+  position: relative;
+  max-width: 560px;
+  margin-top: 30px;
 }
 
 .hero-search :deep(.el-input__wrapper) {
@@ -447,6 +538,88 @@ main {
   background: linear-gradient(135deg, #e5484d, #c92432);
   border-color: transparent;
   box-shadow: 0 12px 22px rgba(229, 72, 77, 0.22);
+  font-weight: 900;
+}
+
+.search-suggest-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  left: 0;
+  z-index: 5;
+  padding: 10px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 22px 46px rgba(15, 23, 42, 0.14);
+}
+
+.search-suggest-panel button,
+.hero-hotwords button {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.search-suggest-panel > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: transparent;
+  color: #111827;
+}
+
+.search-suggest-panel > button:hover {
+  background: #f3f4f6;
+}
+
+.search-suggest-panel small {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.hot-word-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hot-word-row button {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 800;
+}
+
+.hero-hotwords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 560px;
+  margin-top: 12px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.hero-hotwords span {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 900;
+}
+
+.hero-hotwords button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(47, 143, 103, 0.1);
+  color: #2f8f67;
+  font-size: 13px;
   font-weight: 900;
 }
 

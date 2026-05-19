@@ -5,7 +5,16 @@ export interface CreateOrderPayload {
   addressId: ApiId
   remark?: string
   couponId?: ApiId
+  invoiceInfo?: InvoiceInfo
   items?: CreateOrderItemPayload[]
+}
+
+export interface InvoiceInfo {
+  type?: number
+  title?: string
+  taxNo?: string
+  email?: string
+  content?: string
 }
 
 export interface CreateOrderItemPayload {
@@ -73,6 +82,8 @@ export interface OrderLogistics {
   deliveryCompany?: string
   deliveryNo?: string
   deliveryRemark?: string
+  currentAction?: string
+  nextHint?: string
   traces?: OrderLogisticsTrace[]
 }
 
@@ -143,6 +154,7 @@ export interface OrderDetail {
   deliveryNo?: string
   deliveryRemark?: string
   receiver?: ReceiverInfo
+  invoice?: InvoiceInfo
   remark?: string
   createTime?: string
   updateTime?: string

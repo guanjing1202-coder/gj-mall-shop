@@ -8,6 +8,7 @@ import { getAddressList } from '@/api/address'
 import { getMyCoupons } from '@/api/coupon'
 import { getFavoritePage } from '@/api/favorite'
 import { getHistoryPage } from '@/api/history'
+import { getUnreadMessageCount } from '@/api/message'
 import { uploadImage } from '@/api/file'
 import { getOrderPage } from '@/api/order'
 import { useAuthStore } from '@/stores/auth'
@@ -26,6 +27,7 @@ const couponTotal = ref(0)
 const usableCouponTotal = ref(0)
 const favoriteTotal = ref(0)
 const historyTotal = ref(0)
+const unreadMessageTotal = ref(0)
 const profileForm = reactive({
   nickname: '',
   phone: '',
@@ -44,6 +46,7 @@ const quickActions = computed(() => [
   { label: '可用优惠券', value: usableCouponTotal.value, path: '/coupons' },
   { label: '我的收藏', value: favoriteTotal.value, path: '/favorites' },
   { label: '浏览足迹', value: historyTotal.value, path: '/history' },
+  { label: '未读消息', value: unreadMessageTotal.value, path: '/messages' },
   { label: '收货地址', value: addressTotal.value, path: '/addresses' },
   { label: '售后进度', value: '查看', path: '/after-sales' },
 ])
@@ -63,13 +66,14 @@ async function loadDashboard() {
   }
   loading.value = true
   try {
-    const [profile, orders, addresses, coupons, favorites, histories] = await Promise.all([
+    const [profile, orders, addresses, coupons, favorites, histories, messages] = await Promise.all([
       auth.loadProfile(),
       getOrderPage({ pageNum: 1, pageSize: 1 }),
       getAddressList(),
       getMyCoupons(),
       getFavoritePage({ current: 1, size: 1 }),
       getHistoryPage({ current: 1, size: 1 }),
+      getUnreadMessageCount(),
       cart.fetchCart(),
     ])
     if (profile) {
@@ -81,6 +85,7 @@ async function loadDashboard() {
     usableCouponTotal.value = (coupons.data || []).filter((item) => Number(item.status) === 0).length
     favoriteTotal.value = Number(favorites.data?.total || 0)
     historyTotal.value = Number(histories.data?.total || 0)
+    unreadMessageTotal.value = Number(messages.data || 0)
   } finally {
     loading.value = false
   }
@@ -250,6 +255,10 @@ onMounted(() => {
             <button type="button" @click="router.push('/orders')">
               <strong>订单售后</strong>
               <span>查看支付、物流、确认收货</span>
+            </button>
+            <button type="button" @click="router.push('/messages')">
+              <strong>消息中心</strong>
+              <span>订单、物流和售后状态提醒</span>
             </button>
             <button type="button" @click="router.push('/after-sales')">
               <strong>售后进度</strong>

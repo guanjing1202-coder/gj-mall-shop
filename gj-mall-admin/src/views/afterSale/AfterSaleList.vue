@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
@@ -9,6 +9,7 @@ import {
   createAfterSale,
   getAfterSaleDetail,
   getAfterSalePage,
+  getAfterSaleSummary,
   receiveAfterSale,
   refundAfterSale,
   rejectAfterSale,
@@ -18,6 +19,7 @@ import {
   type AfterSaleItem,
   type AfterSaleQuery,
   type AfterSaleRecord,
+  type AfterSaleSummary,
 } from '@/api/afterSale'
 
 const route = useRoute()
@@ -34,10 +36,12 @@ interface CreateFormState {
 type ActionMode = 'approve' | 'reject' | 'receive' | 'refund' | 'cancel'
 
 const loading = ref(false)
+const summaryLoading = ref(false)
 const detailLoading = ref(false)
 const actionLoading = ref(false)
 const creating = ref(false)
 const afterSales = ref<AfterSaleRecord[]>([])
+const summary = ref<AfterSaleSummary>(createEmptySummary())
 const currentAfterSale = ref<AfterSaleRecord>()
 const detailOpen = ref(false)
 const createOpen = ref(false)
@@ -106,8 +110,83 @@ const statusOptions = [
 
 onMounted(() => {
   applyRouteFilters()
+  fetchSummary()
   fetchAfterSales()
 })
+
+const summaryCards = computed(() => [
+  {
+    key: 'all',
+    label: '全部售后',
+    value: formatNumber(summary.value.totalCount),
+    sub: `总金额 ${formatMoney(summary.value.totalAmount)}`,
+    tone: 'slate',
+  },
+  {
+    key: 'processing',
+    label: '处理中',
+    value: formatNumber(summary.value.processingCount),
+    sub: `待处理 ${formatMoney(summary.value.processingAmount)}`,
+    tone: 'blue',
+  },
+  {
+    key: 'pending',
+    label: '待审核',
+    value: formatNumber(summary.value.pendingCount),
+    sub: `申请金额 ${formatMoney(summary.value.pendingAmount)}`,
+    tone: 'orange',
+    status: 0,
+  },
+  {
+    key: 'waitReturn',
+    label: '待退货',
+    value: formatNumber(summary.value.waitReturnCount),
+    sub: `涉及 ${formatMoney(summary.value.waitReturnAmount)}`,
+    tone: 'cyan',
+    status: 1,
+  },
+  {
+    key: 'waitRefund',
+    label: '待退款',
+    value: formatMoney(summary.value.waitRefundAmount),
+    sub: `${formatNumber(summary.value.waitRefundCount)} 笔待退`,
+    tone: 'red',
+    status: 2,
+  },
+  {
+    key: 'completed',
+    label: '已完成',
+    value: formatMoney(summary.value.completedAmount),
+    sub: `${formatNumber(summary.value.completedCount)} 笔完成`,
+    tone: 'green',
+    status: 4,
+  },
+])
+
+const healthCards = computed(() => [
+  {
+    label: '今日新增',
+    value: formatNumber(summary.value.todayNewCount),
+    desc: `申请金额 ${formatMoney(summary.value.todayNewAmount)}`,
+  },
+  {
+    label: '今日退款',
+    value: formatMoney(summary.value.todayRefundedAmount),
+    desc: `${formatNumber(summary.value.todayRefundedCount)} 笔完成退款`,
+  },
+  {
+    label: '完成率',
+    value: formatPercent(summary.value.completionRate),
+    desc: '已完成 / 非取消售后',
+  },
+  {
+    label: '拒绝率',
+    value: formatPercent(summary.value.rejectionRate),
+    desc: '已拒绝 / 非取消售后',
+  },
+])
+
+const visibleTypes = computed(() => (summary.value.types || []).filter((item) => Number(item.count || 0) > 0))
 
 function routeValue(name: string) {
   const value = route.query[name]
@@ -148,6 +227,16 @@ async function fetchAfterSales() {
   }
 }
 
+async function fetchSummary() {
+  summaryLoading.value = true
+  try {
+    const res = await getAfterSaleSummary()
+    summary.value = res.data || createEmptySummary()
+  } finally {
+    summaryLoading.value = false
+  }
+}
+
 async function handleSearch() {
   pagination.current = 1
   await fetchAfterSales()
@@ -158,6 +247,12 @@ async function handleReset() {
   filters.userId = undefined
   filters.type = undefined
   filters.status = undefined
+  pagination.current = 1
+  await fetchAfterSales()
+}
+
+async function applyStatusFilter(status?: number) {
+  filters.status = status
   pagination.current = 1
   await fetchAfterSales()
 }
@@ -202,6 +297,7 @@ async function submitCreate() {
       message.success('售后单创建成功')
       createOpen.value = false
       pagination.current = 1
+      await fetchSummary()
       await fetchAfterSales()
     } finally {
       creating.value = false
@@ -269,6 +365,7 @@ async function submitAction() {
       message.success('售后单已取消')
     }
     actionOpen.value = false
+    await fetchSummary()
     await fetchAfterSales()
     await refreshCurrent(id)
   } finally {
@@ -352,6 +449,14 @@ function formatMoney(value?: number) {
   return `¥${Number(value).toFixed(2)}`
 }
 
+function formatNumber(value?: number) {
+  return Number(value || 0).toLocaleString('zh-CN')
+}
+
+function formatPercent(value?: number) {
+  return `${Number(value || 0).toFixed(2)}%`
+}
+
 function formatSpecs(value?: string | Record<string, string>) {
   if (!value) {
     return '--'
@@ -401,10 +506,72 @@ function toAfterSale(record: Record<string, any>) {
 function toAfterSaleItem(record: Record<string, any>) {
   return record as AfterSaleItem
 }
+
+function createEmptySummary(): AfterSaleSummary {
+  return {
+    totalCount: 0,
+    totalAmount: 0,
+    pendingCount: 0,
+    pendingAmount: 0,
+    waitReturnCount: 0,
+    waitReturnAmount: 0,
+    waitRefundCount: 0,
+    waitRefundAmount: 0,
+    rejectedCount: 0,
+    rejectedAmount: 0,
+    completedCount: 0,
+    completedAmount: 0,
+    canceledCount: 0,
+    canceledAmount: 0,
+    processingCount: 0,
+    processingAmount: 0,
+    todayNewCount: 0,
+    todayNewAmount: 0,
+    todayRefundedCount: 0,
+    todayRefundedAmount: 0,
+    completionRate: 0,
+    rejectionRate: 0,
+    types: [],
+  }
+}
 </script>
 
 <template>
   <a-card title="售后/退货管理" :bordered="false">
+    <a-spin :spinning="summaryLoading">
+      <div class="after-sale-summary">
+        <button
+          v-for="card in summaryCards"
+          :key="card.key"
+          class="summary-card"
+          :class="[`summary-card--${card.tone}`, { active: filters.status === card.status || (card.status === undefined && filters.status === undefined) }]"
+          type="button"
+          @click="applyStatusFilter(card.status)"
+        >
+          <span class="summary-label">{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+          <span class="summary-sub">{{ card.sub }}</span>
+        </button>
+      </div>
+
+      <div class="after-sale-health">
+        <div v-for="card in healthCards" :key="card.label" class="health-card">
+          <span>{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+          <small>{{ card.desc }}</small>
+        </div>
+        <div class="type-strip">
+          <span class="type-title">类型分布</span>
+          <a-empty v-if="!visibleTypes.length" :image="false" description="暂无售后单" />
+          <a-space v-else wrap>
+            <a-tag v-for="item in visibleTypes" :key="item.type" color="blue">
+              {{ item.typeDesc || '未知类型' }}：{{ formatNumber(item.count) }} 笔 / {{ formatMoney(item.amount) }}
+            </a-tag>
+          </a-space>
+        </div>
+      </div>
+    </a-spin>
+
     <a-form layout="inline" style="margin-bottom: 16px; row-gap: 12px">
       <a-form-item>
         <a-input
@@ -682,3 +849,120 @@ function toAfterSaleItem(record: Record<string, any>) {
     </a-form>
   </a-modal>
 </template>
+
+<style scoped>
+.after-sale-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.summary-card {
+  min-height: 110px;
+  padding: 14px 16px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.summary-card:hover,
+.summary-card.active {
+  border-color: #111827;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.summary-card strong {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 21px;
+  line-height: 1.15;
+}
+
+.summary-label,
+.summary-sub {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.summary-card--blue {
+  background: #f8fbff;
+}
+
+.summary-card--orange {
+  background: #fffaf2;
+}
+
+.summary-card--cyan {
+  background: #f6fdff;
+}
+
+.summary-card--red {
+  background: #fff8f8;
+}
+
+.summary-card--green {
+  background: #f6fffb;
+}
+
+.after-sale-health {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 180px)) minmax(280px, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.health-card,
+.type-strip {
+  padding: 12px 14px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.health-card span,
+.type-title {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.health-card strong {
+  display: block;
+  margin: 6px 0 2px;
+  font-size: 20px;
+  color: #111827;
+}
+
+.health-card small {
+  color: #94a3b8;
+}
+
+.type-strip {
+  min-width: 0;
+}
+
+.type-title {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 1400px) {
+  .after-sale-summary {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+
+  .after-sale-health {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+
+  .type-strip {
+    grid-column: 1 / -1;
+  }
+}
+</style>

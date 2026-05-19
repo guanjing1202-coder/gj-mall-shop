@@ -68,6 +68,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '浏览足迹' },
   },
   {
+    path: '/messages',
+    name: 'MessageList',
+    component: () => import('@/views/MessageListView.vue'),
+    meta: { title: '消息中心' },
+  },
+  {
     path: '/after-sales',
     name: 'AfterSaleList',
     component: () => import('@/views/AfterSaleListView.vue'),

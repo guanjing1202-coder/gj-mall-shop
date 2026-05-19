@@ -111,6 +111,22 @@ export interface CategoryItem {
   children?: CategoryItem[]
 }
 
+export interface SearchHotWord {
+  keyword: string
+  type: 'keyword' | 'product' | 'brand' | 'category' | string
+  label?: string
+  targetId?: ApiId
+  heat?: number
+}
+
+export interface SearchSuggestItem {
+  keyword: string
+  type: 'keyword' | 'product' | 'sku' | 'brand' | 'category' | string
+  label?: string
+  targetId?: ApiId
+  image?: string
+}
+
 export function getProductPage(params: ProductQuery) {
   return request.get<ApiResult<PageResult<ProductItem>>>('/api/product/spu/page', { params })
 }
@@ -136,4 +152,14 @@ export function getCategoryTree() {
 
 export function getBrandList() {
   return request.get<ApiResult<BrandItem[]>>('/api/product/brand')
+}
+
+export function getSearchHotWords(limit = 12) {
+  return request.get<ApiResult<SearchHotWord[]>>('/api/product/search/hot', { params: { limit } })
+}
+
+export function getSearchSuggestions(keyword: string, limit = 10) {
+  return request.get<ApiResult<SearchSuggestItem[]>>('/api/product/search/suggest', {
+    params: { keyword, limit },
+  })
 }

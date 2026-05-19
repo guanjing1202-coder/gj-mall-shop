@@ -75,6 +75,39 @@ export interface AfterSaleRecord {
   items?: AfterSaleItem[]
 }
 
+export interface AfterSaleTypeSummary {
+  type: number
+  typeDesc?: string
+  count: number
+  amount: number
+}
+
+export interface AfterSaleSummary {
+  totalCount: number
+  totalAmount: number
+  pendingCount: number
+  pendingAmount: number
+  waitReturnCount: number
+  waitReturnAmount: number
+  waitRefundCount: number
+  waitRefundAmount: number
+  rejectedCount: number
+  rejectedAmount: number
+  completedCount: number
+  completedAmount: number
+  canceledCount: number
+  canceledAmount: number
+  processingCount: number
+  processingAmount: number
+  todayNewCount: number
+  todayNewAmount: number
+  todayRefundedCount: number
+  todayRefundedAmount: number
+  completionRate: number
+  rejectionRate: number
+  types: AfterSaleTypeSummary[]
+}
+
 export interface AfterSaleCreatePayload {
   orderId: ApiId
   type: number
@@ -89,6 +122,10 @@ export interface AfterSaleActionPayload {
   rejectReason?: string
   returnCompany?: string
   returnNo?: string
+}
+
+export function getAfterSaleSummary() {
+  return request.get<ApiResult<AfterSaleSummary>>('/api/admin/after-sale/summary')
 }
 
 export function getAfterSalePage(params: AfterSaleQuery) {

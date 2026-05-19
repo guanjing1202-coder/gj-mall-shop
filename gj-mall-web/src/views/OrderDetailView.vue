@@ -266,6 +266,12 @@ function receiverLine(detail?: OrderDetail) {
   return `${receiver.province || ''}${receiver.city || ''}${receiver.district || ''}${receiver.detail || ''}`
 }
 
+function invoiceTypeLabel(type?: number) {
+  if (type === 1) return '个人发票'
+  if (type === 2) return '企业发票'
+  return '不开发票'
+}
+
 async function loadOrder() {
   if (!auth.isLoggedIn) {
     auth.openLoginDialog()
@@ -619,6 +625,35 @@ onMounted(loadOrder)
             </article>
 
             <article class="detail-block">
+              <span>Invoice</span>
+              <h2>发票信息</h2>
+              <dl>
+                <div>
+                  <dt>类型</dt>
+                  <dd>{{ invoiceTypeLabel(order.invoice?.type) }}</dd>
+                </div>
+                <template v-if="order.invoice">
+                  <div>
+                    <dt>抬头</dt>
+                    <dd>{{ order.invoice.title || '-' }}</dd>
+                  </div>
+                  <div v-if="order.invoice.type === 2">
+                    <dt>税号</dt>
+                    <dd>{{ order.invoice.taxNo || '-' }}</dd>
+                  </div>
+                  <div>
+                    <dt>邮箱</dt>
+                    <dd>{{ order.invoice.email || '-' }}</dd>
+                  </div>
+                  <div>
+                    <dt>内容</dt>
+                    <dd>{{ order.invoice.content || '商品明细' }}</dd>
+                  </div>
+                </template>
+              </dl>
+            </article>
+
+            <article class="detail-block">
               <span>Delivery</span>
               <h2>物流信息</h2>
               <dl>
@@ -645,6 +680,11 @@ onMounted(loadOrder)
                 <h2>物流轨迹</h2>
               </div>
               <strong>{{ logistics?.statusDesc || order.statusDesc || '-' }}</strong>
+            </div>
+
+            <div v-if="logistics?.currentAction || logistics?.nextHint" class="tracking-hint">
+              <strong>{{ logistics?.currentAction || logistics?.statusDesc || order.statusDesc || '履约中' }}</strong>
+              <span>{{ logistics?.nextHint || '请关注订单状态变化。' }}</span>
             </div>
 
             <div v-if="logisticsTraces.length" class="tracking-list">
@@ -1414,6 +1454,27 @@ onMounted(loadOrder)
 .tracking-list {
   display: grid;
   gap: 16px;
+}
+
+.tracking-hint {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.tracking-hint strong {
+  color: #1d4ed8;
+  font-size: 15px;
+}
+
+.tracking-hint span {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .tracking-list article {

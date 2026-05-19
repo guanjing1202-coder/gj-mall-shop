@@ -44,6 +44,9 @@ public class OmsOrder implements Serializable {
     /** 收货地址快照 JSON */
     private String receiverInfo;
 
+    /** 发票信息快照 JSON */
+    private String invoiceInfo;
+
     private String remark;
 
     @TableField(fill = FieldFill.INSERT)

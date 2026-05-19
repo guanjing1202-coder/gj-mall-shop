@@ -35,6 +35,14 @@ export interface Receiver {
   postCode?: string
 }
 
+export interface InvoiceInfo {
+  type?: number
+  title?: string
+  taxNo?: string
+  email?: string
+  content?: string
+}
+
 export interface OrderItem {
   id: ApiId
   spuId?: ApiId
@@ -66,6 +74,7 @@ export interface OrderRecord {
   deliveryNo?: string
   deliveryRemark?: string
   receiver?: Receiver
+  invoice?: InvoiceInfo
   remark?: string
   createTime?: string
   items?: OrderItem[]

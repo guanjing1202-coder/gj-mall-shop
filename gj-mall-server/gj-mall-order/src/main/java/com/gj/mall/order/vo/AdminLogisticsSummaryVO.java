@@ -12,4 +12,11 @@ public class AdminLogisticsSummaryVO {
     private Long receivedTodayCount;
     private Long activeCompanyCount;
     private BigDecimal pendingDeliveryAmount;
+    private BigDecimal pendingReceiveAmount;
+    private BigDecimal shippedTodayAmount;
+    private BigDecimal receivedTodayAmount;
+    private Long overdueDeliveryCount;
+    private Long overdueReceiveCount;
+    private BigDecimal overdueDeliveryAmount;
+    private BigDecimal overdueReceiveAmount;
 }

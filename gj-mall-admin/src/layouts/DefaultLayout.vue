@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import {
   AuditOutlined,
   CommentOutlined,
+  BarChartOutlined,
   DashboardOutlined,
   GiftOutlined,
   LogoutOutlined,
@@ -33,6 +34,7 @@ const route = useRoute()
 const selectedKeys = computed(() => [String(route.name || '')])
 const menuItems = [
   { key: 'Dashboard', label: '仪表盘', permission: 'menu.dashboard', icon: DashboardOutlined },
+  { key: 'Report', label: '经营报表', permission: 'menu.dashboard', icon: BarChartOutlined },
   { key: 'Product', label: '商品管理', permission: 'product.spu.manage', icon: ShoppingOutlined },
   { key: 'ProductBrand', label: '品牌管理', permission: 'product.brand.manage', icon: ShopOutlined },
   { key: 'ProductCategory', label: '分类管理', permission: 'product.category.manage', icon: TagsOutlined },

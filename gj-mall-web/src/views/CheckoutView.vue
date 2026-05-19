@@ -36,6 +36,13 @@ const selectedAddressId = ref<ApiId | ''>('')
 const selectedCouponId = ref<ApiId | ''>('')
 const remark = ref('')
 const directBuyItem = ref<CartItem>()
+const invoiceForm = reactive({
+  type: 0,
+  title: '',
+  taxNo: '',
+  email: '',
+  content: '商品明细',
+})
 const directBuyMode = computed(() => route.query.mode === 'direct' && Boolean(route.query.skuId))
 const addressForm = reactive<AddressPayload>({
   receiver: '',
@@ -137,6 +144,35 @@ function formatDate(value?: string) {
     month: '2-digit',
     day: '2-digit',
   }).format(parsed)
+}
+
+function invoiceTypeLabel(type?: number) {
+  if (type === 1) return '个人'
+  if (type === 2) return '企业'
+  return '不开发票'
+}
+
+function buildInvoiceInfo() {
+  if (!invoiceForm.type) {
+    return undefined
+  }
+  const title = invoiceForm.title.trim()
+  const taxNo = invoiceForm.taxNo.trim()
+  if (!title) {
+    ElMessage.warning('请填写发票抬头')
+    return false
+  }
+  if (invoiceForm.type === 2 && !taxNo) {
+    ElMessage.warning('企业发票请填写纳税人识别号')
+    return false
+  }
+  return {
+    type: invoiceForm.type,
+    title,
+    taxNo: invoiceForm.type === 2 ? taxNo : undefined,
+    email: invoiceForm.email.trim() || undefined,
+    content: invoiceForm.content.trim() || '商品明细',
+  }
 }
 
 function normalizeImage(url?: string, seed = 'checkout') {
@@ -338,10 +374,15 @@ async function submitOrder() {
   }
   submitting.value = true
   try {
+    const invoiceInfo = buildInvoiceInfo()
+    if (invoiceInfo === false) {
+      return
+    }
     const created = await createOrder({
       addressId: selectedAddressId.value,
       remark: remark.value.trim() || undefined,
       couponId: selectedCoupon.value?.couponId,
+      invoiceInfo,
       items: directBuyMode.value
         ? selectedItems.value.map((item) => ({ skuId: item.skuId, quantity: item.quantity }))
         : undefined,
@@ -557,6 +598,41 @@ onMounted(initialize)
               placeholder="选填，给商家的留言"
             />
           </section>
+
+          <section class="checkout-block">
+            <div class="block-heading">
+              <div>
+                <span>Invoice</span>
+                <h2>发票信息</h2>
+              </div>
+              <strong>{{ invoiceTypeLabel(invoiceForm.type) }}</strong>
+            </div>
+            <el-radio-group v-model="invoiceForm.type" class="invoice-type-group">
+              <el-radio-button :label="0">不开发票</el-radio-button>
+              <el-radio-button :label="1">个人</el-radio-button>
+              <el-radio-button :label="2">企业</el-radio-button>
+            </el-radio-group>
+            <div v-if="invoiceForm.type" class="invoice-form">
+              <el-input
+                v-model="invoiceForm.title"
+                maxlength="100"
+                show-word-limit
+                :placeholder="invoiceForm.type === 2 ? '企业名称' : '个人姓名 / 发票抬头'"
+              />
+              <el-input
+                v-if="invoiceForm.type === 2"
+                v-model="invoiceForm.taxNo"
+                maxlength="32"
+                show-word-limit
+                placeholder="纳税人识别号"
+              />
+              <el-input v-model="invoiceForm.email" maxlength="100" placeholder="接收邮箱（选填）" />
+              <el-input v-model="invoiceForm.content" maxlength="50" placeholder="发票内容，例如：商品明细" />
+            </div>
+            <p class="invoice-hint">
+              {{ invoiceForm.type ? '发票信息会随订单保存，后续由商家按订单开具。' : '本单不需要发票，提交后也可以联系客服补开。' }}
+            </p>
+          </section>
         </div>
 
         <aside class="pay-panel">
@@ -587,6 +663,10 @@ onMounted(initialize)
           <div v-if="selectedAddress" class="selected-address">
             <strong>{{ selectedAddress.receiver }} {{ selectedAddress.phone }}</strong>
             <p>{{ addressLine(selectedAddress) }}</p>
+          </div>
+          <div v-if="invoiceForm.type" class="selected-invoice">
+            <strong>{{ invoiceTypeLabel(invoiceForm.type) }}</strong>
+            <p>{{ invoiceForm.title || '待填写抬头' }}</p>
           </div>
           <el-button
             size="large"
@@ -999,7 +1079,8 @@ onMounted(initialize)
 }
 
 .selected-address,
-.selected-coupon {
+.selected-coupon,
+.selected-invoice {
   margin-top: 18px;
   padding: 14px;
   border-radius: 14px;
@@ -1010,17 +1091,40 @@ onMounted(initialize)
   background: #fff7ed;
 }
 
+.selected-invoice {
+  background: #eef8f2;
+}
+
 .selected-address strong,
 .selected-address p,
 .selected-coupon strong,
-.selected-coupon p {
+.selected-coupon p,
+.selected-invoice strong,
+.selected-invoice p {
   display: block;
   margin: 0;
 }
 
 .selected-address p,
-.selected-coupon p {
+.selected-coupon p,
+.selected-invoice p {
   margin-top: 8px;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.invoice-type-group {
+  margin-bottom: 14px;
+}
+
+.invoice-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.invoice-hint {
+  margin: 12px 0 0;
   color: #6b7280;
   line-height: 1.6;
 }

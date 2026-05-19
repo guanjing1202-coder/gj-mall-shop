@@ -1,17 +1,23 @@
 package com.gj.mall.pay.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gj.mall.common.enums.ResultCode;
 import com.gj.mall.common.exception.BizException;
 import com.gj.mall.order.entity.OmsOrder;
+import com.gj.mall.order.entity.PayCallbackRecord;
 import com.gj.mall.order.entity.PayPaymentRecord;
 import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.order.enums.PayChannel;
+import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.service.OrderService;
+import com.gj.mall.pay.config.PayCallbackProperties;
 import com.gj.mall.pay.dto.PayDTO;
 import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.strategy.PayStrategy;
+import com.gj.mall.pay.vo.PayCallbackResultVO;
 import com.gj.mall.pay.vo.PayResultVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,11 +25,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -33,6 +43,9 @@ public class PayServiceImpl implements PayService {
     private final List<PayStrategy> strategies;
     private final OrderService orderService;
     private final PayPaymentRecordMapper recordMapper;
+    private final PayCallbackRecordMapper callbackRecordMapper;
+    private final PayCallbackProperties callbackProperties;
+    private final ObjectMapper objectMapper;
 
     private final Map<String, PayStrategy> strategyMap = new HashMap<>();
 
@@ -103,6 +116,93 @@ public class PayServiceImpl implements PayService {
         orderService.markPaid(record.getOrderId(), record.getChannel());
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PayCallbackResultVO handleCallback(String channel, Map<String, Object> payload, Map<String, String> headers) {
+        PayChannel payChannel = PayChannel.ofName(channel);
+        if (payChannel == null) {
+            throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT, "未知回调渠道：" + channel);
+        }
+        Map<String, Object> safePayload = payload == null ? Collections.emptyMap() : new LinkedHashMap<>(payload);
+        Map<String, String> safeHeaders = headers == null ? Collections.emptyMap() : new LinkedHashMap<>(headers);
+        String payNo = firstText(safePayload, "payNo", "out_trade_no", "outTradeNo");
+        String thirdPayNo = firstText(safePayload, "thirdPayNo", "transaction_id", "trade_no");
+        String notifyId = firstText(safePayload, "notifyId", "notify_id", "eventId", "id");
+        String eventType = firstText(safePayload, "eventType", "event_type", "trade_status", "tradeState");
+        BigDecimal amount = firstAmount(safePayload, "amount", "total_amount", "totalAmount", "payer_total");
+        String rawData = toJson(safePayload);
+
+        PayCallbackRecord callbackRecord = new PayCallbackRecord();
+        callbackRecord.setCallbackNo(genCallbackNo(payChannel.getName()));
+        callbackRecord.setChannel(payChannel.getCode());
+        callbackRecord.setChannelName(payChannel.getName());
+        callbackRecord.setPayNo(payNo);
+        callbackRecord.setThirdPayNo(thirdPayNo);
+        callbackRecord.setNotifyId(notifyId);
+        callbackRecord.setEventType(eventType);
+        callbackRecord.setAmount(amount);
+        callbackRecord.setRetryCount(0);
+        callbackRecord.setRawData(rawData);
+        callbackRecord.setRequestHeaders(toJson(safeHeaders));
+
+        int signatureStatus = verifySignatureStatus(safePayload, safeHeaders);
+        callbackRecord.setSignatureStatus(signatureStatus);
+        if (signatureStatus == 2) {
+            callbackRecord.setProcessStatus(3);
+            callbackRecord.setErrorMessage("签名校验失败");
+            callbackRecordMapper.insert(callbackRecord);
+            throw new BizException(ResultCode.PAY_FAIL, "支付回调签名校验失败");
+        }
+
+        PayCallbackResultVO result = new PayCallbackResultVO();
+        result.setCallbackNo(callbackRecord.getCallbackNo());
+        result.setPayNo(payNo);
+        result.setThirdPayNo(thirdPayNo);
+        result.setChannel(payChannel.getName());
+
+        try {
+            PayPaymentRecord record = loadRecord(payNo, thirdPayNo, notifyId);
+            callbackRecord.setPayNo(record.getPayNo());
+            callbackRecord.setThirdPayNo(firstNonBlank(thirdPayNo, record.getThirdPayNo()));
+            callbackRecord.setAmount(amount == null ? record.getAmount() : amount);
+            if (amount != null && record.getAmount() != null && amount.compareTo(record.getAmount()) != 0) {
+                throw new BizException(ResultCode.PAY_AMOUNT_MISMATCH,
+                        "回调金额 " + amount + " 与支付流水金额 " + record.getAmount() + " 不一致");
+            }
+            if (!payChannel.getCode().equals(record.getChannel())) {
+                throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT, "回调渠道与支付流水渠道不一致");
+            }
+            if (Integer.valueOf(1).equals(record.getStatus())) {
+                callbackRecord.setProcessStatus(2);
+                result.setProcessed(false);
+                result.setDuplicate(true);
+                result.setMessage("支付流水已处理，重复回调已忽略");
+            } else if (Integer.valueOf(3).equals(record.getStatus())) {
+                callbackRecord.setProcessStatus(2);
+                result.setProcessed(false);
+                result.setDuplicate(true);
+                result.setMessage("支付流水已退款，回调已忽略");
+            } else {
+                doMarkPaid(record, record.getChannel(), callbackRecord.getThirdPayNo(), appendCallback(record.getCallbackData(),
+                        "channel-callback callbackNo=" + callbackRecord.getCallbackNo()
+                                + " eventType=" + firstNonBlank(eventType, "-")
+                                + " notifyId=" + firstNonBlank(notifyId, "-")));
+                orderService.markPaid(record.getOrderId(), record.getChannel());
+                callbackRecord.setProcessStatus(1);
+                result.setProcessed(true);
+                result.setDuplicate(false);
+                result.setMessage("支付回调已处理");
+            }
+            callbackRecordMapper.insert(callbackRecord);
+            return result;
+        } catch (RuntimeException ex) {
+            callbackRecord.setProcessStatus(3);
+            callbackRecord.setErrorMessage(ex.getMessage());
+            callbackRecordMapper.insert(callbackRecord);
+            throw ex;
+        }
+    }
+
     private void doMarkPaid(PayPaymentRecord record, Integer channel, String thirdPayNo, String callback) {
         PayPaymentRecord upd = new PayPaymentRecord();
         upd.setId(record.getId());
@@ -115,5 +215,125 @@ public class PayServiceImpl implements PayService {
 
     private String genPayNo(String orderNo) {
         return "P" + orderNo + String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
+    }
+
+    private PayPaymentRecord loadRecord(String payNo, String thirdPayNo, String notifyId) {
+        PayPaymentRecord record = null;
+        if (payNo != null && !payNo.trim().isEmpty()) {
+            record = recordMapper.selectOne(Wrappers.<PayPaymentRecord>lambdaQuery()
+                    .eq(PayPaymentRecord::getPayNo, payNo));
+        }
+        if (record == null && thirdPayNo != null && !thirdPayNo.trim().isEmpty()) {
+            record = recordMapper.selectOne(Wrappers.<PayPaymentRecord>lambdaQuery()
+                    .eq(PayPaymentRecord::getThirdPayNo, thirdPayNo));
+        }
+        if (record == null) {
+            throw new BizException(ResultCode.PAY_RECORD_NOT_FOUND,
+                    "未找到支付流水：" + firstNonBlank(payNo, thirdPayNo, notifyId, "-"));
+        }
+        return record;
+    }
+
+    private int verifySignatureStatus(Map<String, Object> payload, Map<String, String> headers) {
+        String signature = firstText(payload, "signature", "sign");
+        if (signature == null || signature.trim().isEmpty()) {
+            signature = firstHeader(headers, "x-gj-pay-signature", "x-pay-signature", "signature");
+        }
+        if ((signature == null || signature.trim().isEmpty()) && !callbackProperties.isRequireSignature()) {
+            return 0;
+        }
+        if (signature == null || signature.trim().isEmpty()) {
+            return 2;
+        }
+        String expected = hmacSign(payload, callbackProperties.getSecret());
+        return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), signature.trim().getBytes(StandardCharsets.UTF_8)) ? 1 : 2;
+    }
+
+    private String hmacSign(Map<String, Object> payload, String secret) {
+        try {
+            String source = payload.entrySet().stream()
+                    .filter(entry -> entry.getValue() != null)
+                    .filter(entry -> !"signature".equalsIgnoreCase(entry.getKey()) && !"sign".equalsIgnoreCase(entry.getKey()))
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(entry -> entry.getKey() + "=" + String.valueOf(entry.getValue()))
+                    .collect(Collectors.joining("&"));
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(firstNonBlank(secret, "").getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] bytes = mac.doFinal(source.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(bytes.length * 2);
+            for (byte item : bytes) {
+                builder.append(String.format("%02x", item));
+            }
+            return builder.toString();
+        } catch (Exception ex) {
+            throw new BizException(ResultCode.PAY_FAIL, "支付回调签名计算失败");
+        }
+    }
+
+    private String firstText(Map<String, Object> payload, String... keys) {
+        for (String key : keys) {
+            Object value = payload.get(key);
+            if (value == null) {
+                continue;
+            }
+            String text = String.valueOf(value).trim();
+            if (!text.isEmpty()) {
+                return text;
+            }
+        }
+        return null;
+    }
+
+    private String firstHeader(Map<String, String> headers, String... keys) {
+        for (String key : keys) {
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(key)) {
+                    String value = entry.getValue();
+                    if (value != null && !value.trim().isEmpty()) {
+                        return value.trim();
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private BigDecimal firstAmount(Map<String, Object> payload, String... keys) {
+        String text = firstText(payload, keys);
+        if (text == null) {
+            return null;
+        }
+        try {
+            return new BigDecimal(text);
+        } catch (NumberFormatException ex) {
+            throw new BizException(ResultCode.PAY_AMOUNT_MISMATCH, "支付回调金额格式错误");
+        }
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            return String.valueOf(value);
+        }
+    }
+
+    private String appendCallback(String source, String text) {
+        String line = "[" + LocalDateTime.now() + "] " + text;
+        return source == null || source.trim().isEmpty() ? line : source + "\n" + line;
+    }
+
+    private String genCallbackNo(String channel) {
+        return "CB" + channel.toUpperCase(Locale.ROOT) + System.currentTimeMillis()
+                + String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
     }
 }

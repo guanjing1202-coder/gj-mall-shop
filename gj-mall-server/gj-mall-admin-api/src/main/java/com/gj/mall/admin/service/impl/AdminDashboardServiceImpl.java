@@ -13,9 +13,11 @@ import com.gj.mall.marketing.mapper.SmsCouponMapper;
 import com.gj.mall.marketing.mapper.SmsSeckillMapper;
 import com.gj.mall.order.entity.OmsAfterSale;
 import com.gj.mall.order.entity.OmsOrder;
+import com.gj.mall.order.entity.PayPaymentRecord;
 import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.order.mapper.OmsAfterSaleMapper;
 import com.gj.mall.order.mapper.OmsOrderMapper;
+import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.product.dto.AdminInventoryQueryDTO;
 import com.gj.mall.product.entity.PmsBrand;
 import com.gj.mall.product.entity.PmsCategory;
@@ -34,6 +36,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -53,6 +56,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     private final UmsUserMapper userMapper;
     private final OmsOrderMapper orderMapper;
     private final OmsAfterSaleMapper afterSaleMapper;
+    private final PayPaymentRecordMapper paymentRecordMapper;
     private final SmsCouponMapper couponMapper;
     private final SmsSeckillMapper seckillMapper;
 
@@ -151,6 +155,12 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         vo.setPaidAmountTotal(sumPayAmount(null, null));
         vo.setTodayPaidAmount(sumPayAmount(todayStart, tomorrowStart));
         vo.setPendingDeliveryAmount(sumPayAmountByStatuses(Arrays.asList(OrderStatus.PENDING_DELIVERY.getCode()), null, null));
+        Long paidOrderCount = paidOrderCount();
+        vo.setPaidConversionRate(percent(paidOrderCount, vo.getOrderTotal()));
+        vo.setAverageOrderAmount(averageAmount(vo.getPaidAmountTotal(), paidOrderCount));
+        vo.setRefundAmountTotal(sumRefundAmount(null, null));
+        vo.setTodayRefundAmount(sumRefundAmount(todayStart, tomorrowStart));
+        vo.setRefundRate(percent(vo.getRefundedCount(), paidOrderCount));
     }
 
     private void fillBusinessPendingStats(DashboardBusinessVO vo) {
@@ -273,6 +283,58 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             return (BigDecimal) value;
         }
         return new BigDecimal(value.toString());
+    }
+
+    private Long paidOrderCount() {
+        return orderMapper.selectCount(Wrappers.<OmsOrder>lambdaQuery()
+                .in(OmsOrder::getStatus, Arrays.asList(
+                        OrderStatus.PENDING_DELIVERY.getCode(),
+                        OrderStatus.PENDING_RECEIVE.getCode(),
+                        OrderStatus.COMPLETED.getCode(),
+                        OrderStatus.REFUNDING.getCode(),
+                        OrderStatus.REFUNDED.getCode()
+                )));
+    }
+
+    private BigDecimal sumRefundAmount(LocalDateTime start, LocalDateTime end) {
+        QueryWrapper<PayPaymentRecord> wrapper = Wrappers.query();
+        wrapper.select("COALESCE(SUM(amount), 0)");
+        wrapper.eq("status", 3);
+        if (start != null) {
+            wrapper.ge("update_time", start);
+        }
+        if (end != null) {
+            wrapper.lt("update_time", end);
+        }
+        List<Object> rows = paymentRecordMapper.selectObjs(wrapper);
+        if (rows == null || rows.isEmpty() || rows.get(0) == null) {
+            return BigDecimal.ZERO;
+        }
+        Object value = rows.get(0);
+        if (value instanceof BigDecimal) {
+            return (BigDecimal) value;
+        }
+        return new BigDecimal(value.toString());
+    }
+
+    private BigDecimal percent(Long numerator, Long denominator) {
+        long down = denominator == null ? 0L : denominator;
+        if (down <= 0) {
+            return BigDecimal.ZERO;
+        }
+        long up = numerator == null ? 0L : numerator;
+        return BigDecimal.valueOf(up)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(down), 2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal averageAmount(BigDecimal amount, Long count) {
+        long safeCount = count == null ? 0L : count;
+        if (safeCount <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return (amount == null ? BigDecimal.ZERO : amount)
+                .divide(BigDecimal.valueOf(safeCount), 2, RoundingMode.HALF_UP);
     }
 
     private long safeLong(Long value) {

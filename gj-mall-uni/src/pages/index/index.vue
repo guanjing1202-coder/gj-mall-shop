@@ -13,8 +13,31 @@
     </view>
 
     <view class="search-card">
-      <input v-model="keyword" class="search-input" placeholder="搜索手机、耳机、护肤" confirm-type="search" @confirm="search" />
+      <input
+        v-model="keyword"
+        class="search-input"
+        placeholder="搜索手机、耳机、护肤"
+        confirm-type="search"
+        @input="handleKeywordInput"
+        @confirm="search"
+      />
       <button class="search-btn" @tap="search">搜索</button>
+    </view>
+
+    <view v-if="keyword.trim() && suggestions.length" class="suggest-card">
+      <view v-for="item in suggestions" :key="`${item.type}-${item.keyword}`" class="suggest-row" @tap="pickKeyword(item.keyword)">
+        <text>{{ item.keyword }}</text>
+        <text>{{ item.label || '搜索建议' }}</text>
+      </view>
+    </view>
+
+    <view v-if="hotWords.length" class="hot-search">
+      <text>热搜</text>
+      <view class="hot-list">
+        <view v-for="item in hotWords.slice(0, 8)" :key="item.keyword" @tap="pickKeyword(item.keyword)">
+          {{ item.keyword }}
+        </view>
+      </view>
     </view>
 
     <view v-if="activeSeckill" class="seckill-card" @tap="goSeckill">
@@ -51,7 +74,15 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { getProductPage, type ApiId, type ProductItem } from '@/api/product'
+import {
+  getProductPage,
+  getSearchHotWords,
+  getSearchSuggestions,
+  type ApiId,
+  type ProductItem,
+  type SearchHotWord,
+  type SearchSuggestItem,
+} from '@/api/product'
 import { getActiveSeckills, type SeckillActivity } from '@/api/seckill'
 
 const loading = ref(false)
@@ -59,10 +90,14 @@ const seckillLoading = ref(false)
 const keyword = ref('')
 const products = ref<ProductItem[]>([])
 const activeSeckill = ref<SeckillActivity>()
+const hotWords = ref<SearchHotWord[]>([])
+const suggestions = ref<SearchSuggestItem[]>([])
+let suggestTimer: ReturnType<typeof setTimeout> | undefined
 
 onMounted(() => {
   loadProducts()
   loadSeckill()
+  loadSearchMeta()
 })
 
 async function loadProducts() {
@@ -90,9 +125,42 @@ async function loadSeckill() {
   }
 }
 
+async function loadSearchMeta() {
+  const res = await getSearchHotWords(10)
+  hotWords.value = res.data || []
+}
+
 function search() {
   const query = keyword.value.trim()
+  saveSearchHistory(query)
   uni.navigateTo({ url: `/pages/search/search${query ? `?keyword=${encodeURIComponent(query)}` : ''}` })
+}
+
+function handleKeywordInput() {
+  if (suggestTimer) clearTimeout(suggestTimer)
+  suggestTimer = setTimeout(async () => {
+    const query = keyword.value.trim()
+    if (!query) {
+      suggestions.value = []
+      return
+    }
+    const res = await getSearchSuggestions(query, 8)
+    suggestions.value = res.data || []
+  }, 180)
+}
+
+function pickKeyword(value: string) {
+  keyword.value = value
+  suggestions.value = []
+  search()
+}
+
+function saveSearchHistory(value: string) {
+  if (!value) return
+  const current = uni.getStorageSync('gj_mall_search_history') || []
+  const list = Array.isArray(current) ? current : []
+  const next = [value, ...list.filter((item: string) => item !== value)].slice(0, 8)
+  uni.setStorageSync('gj_mall_search_history', next)
 }
 
 function goDetail(id: ApiId) {
@@ -208,6 +276,65 @@ function normalizeImage(url?: string, seed = 'mall') {
   border-radius: 16rpx;
   background: #fff;
   box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.06);
+}
+
+.suggest-card {
+  margin-top: 12rpx;
+  padding: 12rpx;
+  border-radius: 16rpx;
+  background: #fff;
+  box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.06);
+}
+
+.suggest-row {
+  display: flex;
+  min-height: 66rpx;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12rpx;
+  border-radius: 12rpx;
+}
+
+.suggest-row text:first-child {
+  color: #111827;
+  font-size: 27rpx;
+  font-weight: 900;
+}
+
+.suggest-row text:last-child {
+  color: #9ca3af;
+  font-size: 22rpx;
+}
+
+.hot-search {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 16rpx;
+  color: #6b7280;
+  font-size: 24rpx;
+}
+
+.hot-search > text {
+  flex: 0 0 auto;
+  padding-top: 6rpx;
+  font-weight: 900;
+}
+
+.hot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.hot-list view {
+  min-height: 44rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: rgba(47, 143, 103, 0.1);
+  color: #2f8f67;
+  font-size: 23rpx;
+  font-weight: 900;
+  line-height: 44rpx;
 }
 
 .search-input {

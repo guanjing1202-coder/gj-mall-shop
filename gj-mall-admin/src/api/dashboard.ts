@@ -81,6 +81,11 @@ export interface DashboardBusiness {
   paidAmountTotal: number
   todayPaidAmount: number
   pendingDeliveryAmount: number
+  paidConversionRate: number
+  averageOrderAmount: number
+  refundAmountTotal: number
+  todayRefundAmount: number
+  refundRate: number
   pendingAfterSaleCount: number
   pendingCommentCount: number
   activeCouponCount: number

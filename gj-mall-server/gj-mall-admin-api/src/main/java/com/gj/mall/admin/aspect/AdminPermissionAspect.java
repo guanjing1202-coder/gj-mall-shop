@@ -136,6 +136,7 @@ public class AdminPermissionAspect {
     private List<PathPermissionRule> permissionRules() {
         List<PathPermissionRule> rules = new ArrayList<>();
         rules.add(rule("/api/admin/dashboard/**", "menu.dashboard"));
+        rules.add(rule("/api/admin/report/**", "menu.dashboard"));
         rules.add(rule("/api/admin/product/comment/**", "product.comment.manage"));
         rules.add(rule("/api/admin/product/inventory/**", "product.inventory.manage"));
         rules.add(rule("/api/admin/product/brand/**", "product.brand.manage"));

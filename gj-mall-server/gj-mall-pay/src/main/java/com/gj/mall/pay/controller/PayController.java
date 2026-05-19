@@ -5,6 +5,7 @@ import com.gj.mall.framework.context.UserContext;
 import com.gj.mall.framework.security.AuthExclude;
 import com.gj.mall.pay.dto.PayDTO;
 import com.gj.mall.pay.service.PayService;
+import com.gj.mall.pay.vo.PayCallbackResultVO;
 import com.gj.mall.pay.vo.PayResultVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -12,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Tag(name = "15-支付", description = "支付（mock/wechat/alipay）")
 @RestController
@@ -34,5 +37,23 @@ public class PayController {
                                    @RequestParam(required = false) String thirdPayNo) {
         payService.notifyPaid(payNo, thirdPayNo == null ? "DEV-CB-" + payNo : thirdPayNo, "manual-trigger");
         return Result.success();
+    }
+
+    @Operation(summary = "支付渠道回调统一入口")
+    @AuthExclude
+    @PostMapping("/callback/{channel}")
+    public Result<PayCallbackResultVO> callback(
+            @PathVariable String channel,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam Map<String, String> params,
+            @RequestHeader Map<String, String> headers) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (params != null) {
+            payload.putAll(params);
+        }
+        if (body != null) {
+            payload.putAll(body);
+        }
+        return Result.success(payService.handleCallback(channel, payload, headers));
     }
 }

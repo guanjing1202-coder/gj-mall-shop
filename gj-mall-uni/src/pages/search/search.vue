@@ -1,8 +1,43 @@
 <template>
   <view class="page">
     <view class="search-bar">
-      <input v-model="keyword" class="search-input" placeholder="搜索商品" confirm-type="search" @confirm="refresh" />
-      <button @tap="refresh">搜索</button>
+      <input
+        v-model="keyword"
+        class="search-input"
+        placeholder="搜索商品"
+        confirm-type="search"
+        @input="handleKeywordInput"
+        @confirm="submitSearch"
+      />
+      <button @tap="submitSearch">搜索</button>
+    </view>
+
+    <view v-if="keyword.trim() && suggestions.length" class="suggest-card">
+      <view v-for="item in suggestions" :key="`${item.type}-${item.keyword}`" class="suggest-row" @tap="pickKeyword(item.keyword)">
+        <text>{{ item.keyword }}</text>
+        <text>{{ item.label || '搜索建议' }}</text>
+      </view>
+    </view>
+
+    <view v-if="!products.length || !keyword.trim()" class="discovery-card">
+      <view v-if="historyWords.length" class="discovery-section">
+        <view class="discovery-title">
+          <text>搜索历史</text>
+          <button @tap="clearHistory">清空</button>
+        </view>
+        <view class="chip-list">
+          <view v-for="item in historyWords" :key="item" @tap="pickKeyword(item)">{{ item }}</view>
+        </view>
+      </view>
+
+      <view v-if="hotWords.length" class="discovery-section">
+        <view class="discovery-title">
+          <text>大家都在搜</text>
+        </view>
+        <view class="chip-list">
+          <view v-for="item in hotWords" :key="item.keyword" @tap="pickKeyword(item.keyword)">{{ item.keyword }}</view>
+        </view>
+      </view>
     </view>
 
     <scroll-view scroll-x class="sort-tabs">
@@ -48,7 +83,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { onLoad, onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
-import { getProductPage, type ApiId, type ProductItem, type ProductQuery } from '@/api/product'
+import {
+  getProductPage,
+  getSearchHotWords,
+  getSearchSuggestions,
+  type ApiId,
+  type ProductItem,
+  type ProductQuery,
+  type SearchHotWord,
+  type SearchSuggestItem,
+} from '@/api/product'
 
 const sortOptions: Array<{ label: string; value: ProductQuery['sort'] }> = [
   { label: '综合推荐', value: 'operation' },
@@ -67,12 +111,18 @@ const sort = ref<ProductQuery['sort']>('operation')
 const pageNum = ref(1)
 const total = ref(0)
 const routeKeyword = ref('')
+const hotWords = ref<SearchHotWord[]>([])
+const suggestions = ref<SearchSuggestItem[]>([])
+const historyWords = ref<string[]>([])
+let suggestTimer: ReturnType<typeof setTimeout> | undefined
 
 onLoad((options: any) => {
   routeKeyword.value = decodeURIComponent(options?.keyword || '')
   keyword.value = routeKeyword.value
   categoryId.value = options?.categoryId
   brandId.value = options?.brandId
+  loadSearchMeta()
+  loadHistory()
   refresh()
 })
 
@@ -99,9 +149,16 @@ onReachBottom(() => {
 })
 
 async function refresh() {
+  saveHistory(keyword.value.trim())
+  suggestions.value = []
   pageNum.value = 1
   finished.value = false
   await loadProducts(true)
+}
+
+async function submitSearch() {
+  routeKeyword.value = keyword.value.trim()
+  await refresh()
 }
 
 async function loadProducts(reset: boolean) {
@@ -138,6 +195,47 @@ function clearKeyword() {
   refresh()
 }
 
+async function loadSearchMeta() {
+  const res = await getSearchHotWords(12)
+  hotWords.value = res.data || []
+}
+
+function loadHistory() {
+  const current = uni.getStorageSync('gj_mall_search_history') || []
+  historyWords.value = Array.isArray(current) ? current.filter(Boolean).slice(0, 8) : []
+}
+
+function saveHistory(value: string) {
+  if (!value) return
+  const next = [value, ...historyWords.value.filter((item) => item !== value)].slice(0, 8)
+  historyWords.value = next
+  uni.setStorageSync('gj_mall_search_history', next)
+}
+
+function clearHistory() {
+  historyWords.value = []
+  uni.removeStorageSync('gj_mall_search_history')
+}
+
+function handleKeywordInput() {
+  if (suggestTimer) clearTimeout(suggestTimer)
+  suggestTimer = setTimeout(async () => {
+    const query = keyword.value.trim()
+    if (!query) {
+      suggestions.value = []
+      return
+    }
+    const res = await getSearchSuggestions(query, 10)
+    suggestions.value = res.data || []
+  }, 180)
+}
+
+async function pickKeyword(value: string) {
+  keyword.value = value
+  suggestions.value = []
+  await submitSearch()
+}
+
 function goDetail(id: ApiId) {
   uni.navigateTo({ url: `/pages/product/detail?id=${id}` })
 }
@@ -170,6 +268,82 @@ function normalizeImage(url?: string, seed = 'search') {
   border-radius: 16rpx;
   background: #fff;
   box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.05);
+}
+
+.suggest-card,
+.discovery-card {
+  margin-top: 16rpx;
+  padding: 16rpx;
+  border-radius: 16rpx;
+  background: #fff;
+  box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.05);
+}
+
+.suggest-row {
+  display: flex;
+  min-height: 66rpx;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12rpx;
+  border-radius: 12rpx;
+}
+
+.suggest-row text:first-child {
+  color: #111827;
+  font-size: 27rpx;
+  font-weight: 900;
+}
+
+.suggest-row text:last-child {
+  color: #9ca3af;
+  font-size: 22rpx;
+}
+
+.discovery-card {
+  display: grid;
+  gap: 18rpx;
+}
+
+.discovery-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+}
+
+.discovery-title text {
+  color: #111827;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.discovery-title button {
+  height: 44rpx;
+  margin: 0;
+  padding: 0 16rpx;
+  border: 0;
+  border-radius: 999rpx;
+  background: #f3f4f6;
+  color: #9ca3af;
+  font-size: 22rpx;
+  line-height: 44rpx;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.chip-list view {
+  min-height: 50rpx;
+  padding: 0 20rpx;
+  border-radius: 999rpx;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 50rpx;
 }
 
 .search-input {

@@ -4,6 +4,7 @@ import com.gj.mall.admin.dto.AdminAfterSaleActionDTO;
 import com.gj.mall.admin.dto.AdminAfterSaleCreateDTO;
 import com.gj.mall.admin.dto.AdminAfterSaleQueryDTO;
 import com.gj.mall.admin.service.AdminAfterSaleService;
+import com.gj.mall.admin.vo.AdminAfterSaleSummaryVO;
 import com.gj.mall.admin.vo.AdminAfterSaleVO;
 import com.gj.mall.common.result.PageResult;
 import com.gj.mall.common.result.Result;
@@ -21,6 +22,12 @@ import javax.validation.Valid;
 public class AdminAfterSaleController {
 
     private final AdminAfterSaleService afterSaleService;
+
+    @Operation(summary = "售后处理汇总")
+    @GetMapping("/summary")
+    public Result<AdminAfterSaleSummaryVO> summary() {
+        return Result.success(afterSaleService.summary());
+    }
 
     @Operation(summary = "售后单分页")
     @GetMapping("/page")

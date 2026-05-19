@@ -42,6 +42,10 @@
         </view>
         <view v-if="logisticsLoading" class="empty small">物流加载中...</view>
         <view v-else>
+          <view v-if="logistics?.currentAction || logistics?.nextHint" class="logistics-hint">
+            <text>{{ logistics?.currentAction || logistics?.statusDesc || '履约中' }}</text>
+            <text>{{ logistics?.nextHint || '请关注订单状态变化。' }}</text>
+          </view>
           <view v-if="logistics?.deliveryNo" class="delivery-card">
             <view>
               <text>物流公司</text>
@@ -129,6 +133,35 @@
         <view class="info-row">
           <text>地址</text>
           <text>{{ receiverLine }}</text>
+        </view>
+      </view>
+
+      <view class="panel">
+        <view class="section-head">
+          <text>发票信息</text>
+          <text class="muted">{{ invoiceTypeLabel(order.invoice?.type) }}</text>
+        </view>
+        <template v-if="order.invoice">
+          <view class="info-row">
+            <text>发票抬头</text>
+            <text>{{ order.invoice.title || '-' }}</text>
+          </view>
+          <view v-if="order.invoice.type === 2" class="info-row">
+            <text>税号</text>
+            <text>{{ order.invoice.taxNo || '-' }}</text>
+          </view>
+          <view class="info-row">
+            <text>接收邮箱</text>
+            <text>{{ order.invoice.email || '-' }}</text>
+          </view>
+          <view class="info-row">
+            <text>发票内容</text>
+            <text>{{ order.invoice.content || '商品明细' }}</text>
+          </view>
+        </template>
+        <view v-else class="service-empty">
+          <text>本单未申请发票</text>
+          <text>如需补开，可联系商家处理。</text>
         </view>
       </view>
 
@@ -626,6 +659,12 @@ function formatTime(value?: string) {
   return String(value).slice(0, 16).replace('T', ' ')
 }
 
+function invoiceTypeLabel(type?: number) {
+  if (type === 1) return '个人发票'
+  if (type === 2) return '企业发票'
+  return '不开发票'
+}
+
 function normalizeImage(url?: string, seed = 'order') {
   if (!url || url.indexOf('x.com/') >= 0) {
     return `https://picsum.photos/seed/${encodeURIComponent(seed)}/360/360`
@@ -905,6 +944,28 @@ function previewFormImages(kind: ImageFormKind, index: number) {
   padding: 18rpx;
   border-radius: 14rpx;
   background: #f7f8f5;
+}
+
+.logistics-hint {
+  display: grid;
+  gap: 8rpx;
+  margin-bottom: 18rpx;
+  padding: 18rpx;
+  border: 1rpx solid #bfdbfe;
+  border-radius: 14rpx;
+  background: #eff6ff;
+}
+
+.logistics-hint text:first-child {
+  color: #1d4ed8;
+  font-size: 27rpx;
+  font-weight: 900;
+}
+
+.logistics-hint text:last-child {
+  color: #475569;
+  font-size: 23rpx;
+  line-height: 1.4;
 }
 
 .delivery-card view {

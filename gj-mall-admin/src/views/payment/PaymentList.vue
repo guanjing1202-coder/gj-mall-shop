@@ -1,24 +1,35 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import type { TableColumnsType } from 'ant-design-vue'
 import {
+  getPaymentAccess,
+  getPaymentCallbackPage,
   getPaymentDetail,
   getPaymentPage,
+  getPaymentSummary,
   markPaymentFailed,
   markPaymentPaid,
   refundPayment,
   type ApiId,
+  type PaymentAccess,
+  type PaymentCallbackRecord,
   type PaymentQuery,
   type PaymentRecord,
+  type PaymentSummary,
 } from '@/api/payment'
 
 const route = useRoute()
 const loading = ref(false)
+const summaryLoading = ref(false)
 const detailLoading = ref(false)
+const callbackLoading = ref(false)
 const actionId = ref<ApiId>()
 const payments = ref<PaymentRecord[]>([])
+const summary = ref<PaymentSummary>(createEmptySummary())
+const access = ref<PaymentAccess>(createEmptyAccess())
+const callbacks = ref<PaymentCallbackRecord[]>([])
 const detailOpen = ref(false)
 const currentPayment = ref<PaymentRecord>()
 
@@ -71,7 +82,71 @@ const statusOptions = [
 
 onMounted(() => {
   applyRouteFilters()
+  fetchSummary()
+  fetchAccess()
+  fetchCallbacks()
   fetchPayments()
+})
+
+const summaryCards = computed(() => [
+  {
+    key: 'total',
+    label: '全部流水',
+    value: formatNumber(summary.value.totalCount),
+    sub: `总金额 ${formatMoney(summary.value.totalAmount)}`,
+    tone: 'slate',
+  },
+  {
+    key: 'pending',
+    label: '待支付',
+    value: formatNumber(summary.value.pendingCount),
+    sub: `待收 ${formatMoney(summary.value.pendingAmount)}`,
+    tone: 'blue',
+    status: 0,
+  },
+  {
+    key: 'paid',
+    label: '已支付',
+    value: formatMoney(summary.value.paidAmount),
+    sub: `${formatNumber(summary.value.paidCount)} 笔 / 今日 ${formatMoney(summary.value.todayPaidAmount)}`,
+    tone: 'green',
+    status: 1,
+  },
+  {
+    key: 'failed',
+    label: '支付失败',
+    value: formatNumber(summary.value.failedCount),
+    sub: `失败金额 ${formatMoney(summary.value.failedAmount)}`,
+    tone: 'red',
+    status: 2,
+  },
+  {
+    key: 'refunded',
+    label: '已退款',
+    value: formatMoney(summary.value.refundedAmount),
+    sub: `${formatNumber(summary.value.refundedCount)} 笔 / 今日 ${formatMoney(summary.value.todayRefundedAmount)}`,
+    tone: 'orange',
+    status: 3,
+  },
+])
+
+const healthCards = computed(() => [
+  { label: '支付成功率', value: formatPercent(summary.value.successRate), desc: '已支付笔数 / 全部流水' },
+  { label: '退款率', value: formatPercent(summary.value.refundRate), desc: '已退款笔数 / 成功支付流水' },
+])
+
+const visibleChannels = computed(() => (summary.value.channels || []).filter((item) => Number(item.count || 0) > 0))
+
+const callbackStatusCards = computed(() => {
+  const handled = callbacks.value.filter((item) => item.processStatus === 1).length
+  const ignored = callbacks.value.filter((item) => item.processStatus === 2).length
+  const failed = callbacks.value.filter((item) => item.processStatus === 3).length
+  return [
+    { label: '最近回调', value: formatNumber(callbacks.value.length), tone: 'slate' },
+    { label: '已处理', value: formatNumber(handled), tone: 'green' },
+    { label: '幂等忽略', value: formatNumber(ignored), tone: 'blue' },
+    { label: '处理失败', value: formatNumber(failed), tone: 'red' },
+  ]
 })
 
 function routeValue(name: string) {
@@ -113,6 +188,35 @@ async function fetchPayments() {
   }
 }
 
+async function fetchSummary() {
+  summaryLoading.value = true
+  try {
+    const res = await getPaymentSummary()
+    summary.value = res.data || createEmptySummary()
+  } finally {
+    summaryLoading.value = false
+  }
+}
+
+async function fetchAccess() {
+  const res = await getPaymentAccess()
+  access.value = res.data || createEmptyAccess()
+}
+
+async function fetchCallbacks(keyword?: string) {
+  callbackLoading.value = true
+  try {
+    const res = await getPaymentCallbackPage({
+      pageNum: 1,
+      pageSize: 6,
+      keyword: keyword || undefined,
+    })
+    callbacks.value = res.data.list || []
+  } finally {
+    callbackLoading.value = false
+  }
+}
+
 async function handleSearch() {
   pagination.current = 1
   await fetchPayments()
@@ -123,6 +227,12 @@ async function handleReset() {
   filters.userId = undefined
   filters.channel = undefined
   filters.status = undefined
+  pagination.current = 1
+  await fetchPayments()
+}
+
+async function applyStatusFilter(status?: number) {
+  filters.status = status
   pagination.current = 1
   await fetchPayments()
 }
@@ -140,6 +250,7 @@ async function handleView(record: PaymentRecord) {
   try {
     const res = await getPaymentDetail(record.id)
     currentPayment.value = res.data
+    await fetchCallbacks(record.payNo)
   } finally {
     detailLoading.value = false
   }
@@ -155,6 +266,7 @@ function handleMarkPaid(record: PaymentRecord) {
       try {
         await markPaymentPaid(record.id, thirdPayNo.trim() || undefined)
         message.success('已同步为支付成功')
+        await fetchSummary()
         await fetchPayments()
         await refreshCurrentPayment(record.id)
       } finally {
@@ -174,6 +286,7 @@ function handleMarkFailed(record: PaymentRecord) {
       try {
         await markPaymentFailed(record.id, '后台手动标记失败')
         message.success('已标记为失败')
+        await fetchSummary()
         await fetchPayments()
         await refreshCurrentPayment(record.id)
       } finally {
@@ -206,6 +319,7 @@ async function submitRefund() {
     })
     message.success('退款成功')
     refundOpen.value = false
+    await fetchSummary()
     await fetchPayments()
     await refreshCurrentPayment(refundTarget.value.id)
   } finally {
@@ -254,6 +368,14 @@ function formatMoney(value?: number) {
   return `¥${Number(value).toFixed(2)}`
 }
 
+function formatNumber(value?: number) {
+  return Number(value || 0).toLocaleString('zh-CN')
+}
+
+function formatPercent(value?: number) {
+  return `${Number(value || 0).toFixed(2)}%`
+}
+
 function userText(record?: PaymentRecord) {
   if (!record) {
     return '--'
@@ -281,10 +403,112 @@ function canRefund(record: PaymentRecord) {
 function toPayment(record: Record<string, any>) {
   return record as PaymentRecord
 }
+
+function createEmptySummary(): PaymentSummary {
+  return {
+    totalCount: 0,
+    totalAmount: 0,
+    pendingCount: 0,
+    pendingAmount: 0,
+    paidCount: 0,
+    paidAmount: 0,
+    failedCount: 0,
+    failedAmount: 0,
+    refundedCount: 0,
+    refundedAmount: 0,
+    todayPaidAmount: 0,
+    todayRefundedAmount: 0,
+    successRate: 0,
+    refundRate: 0,
+    channels: [],
+  }
+}
+
+function createEmptyAccess(): PaymentAccess {
+  return {
+    mode: 'mock',
+    callbackRequireSignature: false,
+    callbackPath: '/api/pay/callback/{channel}',
+    devSignatureAlgorithm: 'HmacSHA256(sortedPayload, mall.pay.callback.secret)',
+    channels: [],
+  }
+}
+
+function processStatusColor(status?: number) {
+  if (status === 1) return 'success'
+  if (status === 2) return 'processing'
+  if (status === 3) return 'error'
+  return 'default'
+}
+
+function signatureStatusColor(status?: number) {
+  if (status === 1) return 'success'
+  if (status === 2) return 'error'
+  return 'default'
+}
 </script>
 
 <template>
   <a-card title="支付退款管理" :bordered="false">
+    <a-spin :spinning="summaryLoading">
+      <section class="access-panel">
+        <div class="access-main">
+          <span>支付接入状态</span>
+          <strong>{{ access.mode === 'real' ? '真实支付模式' : 'Mock 支付模式' }}</strong>
+          <small>回调入口：{{ access.callbackPath }} / {{ access.callbackRequireSignature ? '强制验签' : '开发环境允许无签名' }}</small>
+        </div>
+        <div class="access-channels">
+          <a-tag v-for="item in access.channels" :key="item.name" :color="item.enabled ? 'green' : 'default'">
+            {{ item.desc }} · {{ item.status }}
+          </a-tag>
+        </div>
+      </section>
+
+      <div class="payment-summary">
+        <button
+          v-for="card in summaryCards"
+          :key="card.key"
+          class="summary-card"
+          :class="[`summary-card--${card.tone}`, { active: filters.status === card.status || (card.status === undefined && filters.status === undefined) }]"
+          type="button"
+          @click="applyStatusFilter(card.status)"
+        >
+          <span class="summary-label">{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+          <span class="summary-sub">{{ card.sub }}</span>
+        </button>
+      </div>
+
+      <div class="payment-health">
+        <div v-for="card in healthCards" :key="card.label" class="health-card">
+          <span>{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+          <small>{{ card.desc }}</small>
+        </div>
+        <div class="channel-strip">
+          <span class="channel-title">渠道分布</span>
+          <a-empty v-if="!visibleChannels.length" :image="false" description="暂无支付流水" />
+          <a-space v-else wrap>
+            <a-tag v-for="item in visibleChannels" :key="item.channel" color="blue">
+              {{ item.channelDesc || '未知渠道' }}：{{ formatNumber(item.count) }} 笔 / {{ formatMoney(item.amount) }}
+            </a-tag>
+          </a-space>
+        </div>
+      </div>
+
+      <div class="callback-health">
+        <div v-for="card in callbackStatusCards" :key="card.label" class="callback-card" :class="`callback-card--${card.tone}`">
+          <span>{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+        </div>
+        <div class="callback-tip">
+          <span>回调验签</span>
+          <strong>{{ access.devSignatureAlgorithm }}</strong>
+          <small>真实微信/支付宝 SDK 接入后，这里会记录每次异步通知的验签和处理结果。</small>
+        </div>
+      </div>
+    </a-spin>
+
     <a-form layout="inline" style="margin-bottom: 16px; row-gap: 12px">
       <a-form-item>
         <a-input
@@ -451,6 +675,35 @@ function toPayment(record: Record<string, any>) {
           />
         </div>
 
+        <div style="margin-top: 20px">
+          <h4 style="margin-bottom: 12px">最近渠道回调</h4>
+          <a-spin :spinning="callbackLoading">
+            <a-empty v-if="!callbacks.length" :image="false" description="暂无回调记录" />
+            <a-timeline v-else>
+              <a-timeline-item v-for="item in callbacks" :key="item.id">
+                <div class="callback-line">
+                  <div>
+                    <strong>{{ item.callbackNo }}</strong>
+                    <span>{{ item.createTime || '--' }}</span>
+                  </div>
+                  <p>
+                    {{ item.channelDesc || '--' }} / {{ item.eventType || '支付通知' }} / {{ formatMoney(item.amount) }}
+                  </p>
+                  <a-space wrap>
+                    <a-tag :color="signatureStatusColor(item.signatureStatus)">
+                      {{ item.signatureStatusDesc || '--' }}
+                    </a-tag>
+                    <a-tag :color="processStatusColor(item.processStatus)">
+                      {{ item.processStatusDesc || '--' }}
+                    </a-tag>
+                    <a-tag v-if="item.errorMessage" color="red">{{ item.errorMessage }}</a-tag>
+                  </a-space>
+                </div>
+              </a-timeline-item>
+            </a-timeline>
+          </a-spin>
+        </div>
+
         <div style="margin-top: 20px; display: flex; justify-content: flex-end">
           <a-space>
             <a-button
@@ -493,3 +746,213 @@ function toPayment(record: Record<string, any>) {
     </a-form>
   </a-modal>
 </template>
+
+<style scoped>
+.payment-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.access-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(320px, 2fr);
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.access-main span,
+.access-main small,
+.callback-tip span,
+.callback-tip small {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.access-main strong,
+.callback-tip strong {
+  display: block;
+  margin: 6px 0;
+  color: #111827;
+}
+
+.access-channels {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.callback-health {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 160px)) minmax(280px, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.callback-card,
+.callback-tip {
+  min-height: 78px;
+  padding: 12px 14px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.callback-card span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.callback-card strong {
+  display: block;
+  margin-top: 10px;
+  color: #111827;
+  font-size: 22px;
+}
+
+.callback-card--green {
+  background: #f6fffb;
+}
+
+.callback-card--blue {
+  background: #f8fbff;
+}
+
+.callback-card--red {
+  background: #fff8f8;
+}
+
+.callback-line strong,
+.callback-line span,
+.callback-line p {
+  display: block;
+}
+
+.callback-line span {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.callback-line p {
+  margin: 8px 0;
+  color: #475569;
+}
+
+.summary-card {
+  min-height: 112px;
+  padding: 14px 16px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.summary-card:hover,
+.summary-card.active {
+  border-color: #111827;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.summary-card strong {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.summary-label,
+.summary-sub {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.summary-card--blue {
+  background: #f8fbff;
+}
+
+.summary-card--green {
+  background: #f6fffb;
+}
+
+.summary-card--red {
+  background: #fff8f8;
+}
+
+.summary-card--orange {
+  background: #fffaf2;
+}
+
+.payment-health {
+  display: grid;
+  grid-template-columns: 180px 180px minmax(280px, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.health-card,
+.channel-strip {
+  padding: 12px 14px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.health-card span,
+.channel-title {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.health-card strong {
+  display: block;
+  margin: 6px 0 2px;
+  font-size: 20px;
+  color: #111827;
+}
+
+.health-card small {
+  color: #94a3b8;
+}
+
+.channel-strip {
+  min-width: 0;
+}
+
+.channel-title {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 1200px) {
+  .payment-summary {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+
+  .payment-health {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+
+  .channel-strip {
+    grid-column: 1 / -1;
+  }
+
+  .access-panel,
+  .callback-health {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

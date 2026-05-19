@@ -5,26 +5,36 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.gj.mall.admin.dto.AdminPaymentCallbackQueryDTO;
 import com.gj.mall.admin.dto.AdminPaymentQueryDTO;
 import com.gj.mall.admin.dto.AdminPaymentRefundDTO;
 import com.gj.mall.admin.service.AdminPaymentService;
+import com.gj.mall.admin.vo.AdminPaymentAccessVO;
+import com.gj.mall.admin.vo.AdminPaymentCallbackVO;
+import com.gj.mall.admin.vo.AdminPaymentSummaryVO;
 import com.gj.mall.admin.vo.AdminPaymentVO;
 import com.gj.mall.common.enums.ResultCode;
 import com.gj.mall.common.exception.BizException;
 import com.gj.mall.common.result.PageResult;
 import com.gj.mall.order.entity.OmsOrder;
+import com.gj.mall.order.entity.PayCallbackRecord;
 import com.gj.mall.order.entity.PayPaymentRecord;
 import com.gj.mall.order.enums.OrderStatus;
+import com.gj.mall.order.enums.PayChannel;
 import com.gj.mall.order.mapper.OmsOrderMapper;
+import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -34,9 +44,87 @@ import java.util.stream.Collectors;
 public class AdminPaymentServiceImpl implements AdminPaymentService {
 
     private final PayPaymentRecordMapper recordMapper;
+    private final PayCallbackRecordMapper callbackRecordMapper;
     private final OmsOrderMapper orderMapper;
     private final UmsUserMapper userMapper;
     private final OrderService orderService;
+
+    @Value("${mall.pay.mode:mock}")
+    private String payMode;
+
+    @Value("${mall.pay.callback.require-signature:false}")
+    private Boolean requireSignature;
+
+    @Override
+    public AdminPaymentSummaryVO summary() {
+        LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+        LocalDateTime tomorrowStart = todayStart.plusDays(1);
+
+        AdminPaymentSummaryVO vo = new AdminPaymentSummaryVO();
+        vo.setTotalCount(countByStatus(null));
+        vo.setTotalAmount(sumAmountByStatus(null, null, null));
+        vo.setPendingCount(countByStatus(0));
+        vo.setPendingAmount(sumAmountByStatus(0, null, null));
+        vo.setPaidCount(countByStatus(1));
+        vo.setPaidAmount(sumAmountByStatus(1, null, null));
+        vo.setFailedCount(countByStatus(2));
+        vo.setFailedAmount(sumAmountByStatus(2, null, null));
+        vo.setRefundedCount(countByStatus(3));
+        vo.setRefundedAmount(sumAmountByStatus(3, null, null));
+        vo.setTodayPaidAmount(sumAmountByStatus(1, todayStart, tomorrowStart));
+        vo.setTodayRefundedAmount(sumAmountByStatus(3, todayStart, tomorrowStart));
+        Long successCount = safeLong(vo.getPaidCount()) + safeLong(vo.getRefundedCount());
+        vo.setSuccessRate(percent(successCount, vo.getTotalCount()));
+        vo.setRefundRate(percent(vo.getRefundedCount(), successCount));
+        vo.setChannels(buildChannelSummary());
+        return vo;
+    }
+
+    @Override
+    public AdminPaymentAccessVO access() {
+        AdminPaymentAccessVO vo = new AdminPaymentAccessVO();
+        vo.setMode(payMode);
+        vo.setCallbackRequireSignature(Boolean.TRUE.equals(requireSignature));
+        vo.setCallbackPath("/api/pay/callback/{channel}");
+        vo.setDevSignatureAlgorithm("HmacSHA256(sortedPayload, mall.pay.callback.secret)");
+        boolean realMode = "real".equalsIgnoreCase(payMode);
+        vo.getChannels().add(AdminPaymentAccessVO.ChannelItem.of(
+                PayChannel.MOCK.getCode(), PayChannel.MOCK.getName(), PayChannel.MOCK.getDesc(), true, "开发环境即时成功"));
+        vo.getChannels().add(AdminPaymentAccessVO.ChannelItem.of(
+                PayChannel.WECHAT.getCode(), PayChannel.WECHAT.getName(), PayChannel.WECHAT.getDesc(), realMode, realMode ? "待接入商户配置" : "未启用"));
+        vo.getChannels().add(AdminPaymentAccessVO.ChannelItem.of(
+                PayChannel.ALIPAY.getCode(), PayChannel.ALIPAY.getName(), PayChannel.ALIPAY.getDesc(), realMode, realMode ? "待接入应用配置" : "未启用"));
+        return vo;
+    }
+
+    @Override
+    public PageResult<AdminPaymentCallbackVO> callbackPage(AdminPaymentCallbackQueryDTO query) {
+        long pageNum = query.getPageNum() == null || query.getPageNum() <= 0 ? 1 : query.getPageNum();
+        long pageSize = query.getPageSize() == null || query.getPageSize() <= 0 ? 10 : Math.min(query.getPageSize(), 50);
+        IPage<PayCallbackRecord> result = callbackRecordMapper.selectPage(
+                new Page<>(pageNum, pageSize),
+                Wrappers.<PayCallbackRecord>lambdaQuery()
+                        .and(StrUtil.isNotBlank(query.getKeyword()), w -> w
+                                .like(PayCallbackRecord::getCallbackNo, query.getKeyword())
+                                .or()
+                                .like(PayCallbackRecord::getPayNo, query.getKeyword())
+                                .or()
+                                .like(PayCallbackRecord::getThirdPayNo, query.getKeyword())
+                                .or()
+                                .like(PayCallbackRecord::getNotifyId, query.getKeyword()))
+                        .eq(query.getChannel() != null, PayCallbackRecord::getChannel, query.getChannel())
+                        .eq(query.getSignatureStatus() != null, PayCallbackRecord::getSignatureStatus, query.getSignatureStatus())
+                        .eq(query.getProcessStatus() != null, PayCallbackRecord::getProcessStatus, query.getProcessStatus())
+                        .orderByDesc(PayCallbackRecord::getCreateTime));
+        if (CollUtil.isEmpty(result.getRecords())) {
+            return PageResult.empty(result.getCurrent(), result.getSize());
+        }
+        return new PageResult<>(
+                result.getTotal(),
+                result.getCurrent(),
+                result.getSize(),
+                result.getRecords().stream().map(AdminPaymentCallbackVO::from).collect(Collectors.toList()));
+    }
 
     @Override
     public PageResult<AdminPaymentVO> page(AdminPaymentQueryDTO query) {
@@ -148,6 +236,106 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
             throw new BizException(ResultCode.PAY_RECORD_NOT_FOUND);
         }
         return record;
+    }
+
+    private Long countByStatus(Integer status) {
+        return recordMapper.selectCount(Wrappers.<PayPaymentRecord>lambdaQuery()
+                .eq(status != null, PayPaymentRecord::getStatus, status));
+    }
+
+    private BigDecimal sumAmountByStatus(Integer status, LocalDateTime start, LocalDateTime end) {
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<PayPaymentRecord> wrapper = Wrappers.query();
+        wrapper.select("COALESCE(SUM(amount), 0)");
+        if (status != null) {
+            wrapper.eq("status", status);
+        }
+        if (start != null) {
+            wrapper.ge("update_time", start);
+        }
+        if (end != null) {
+            wrapper.lt("update_time", end);
+        }
+        List<Object> rows = recordMapper.selectObjs(wrapper);
+        if (rows == null || rows.isEmpty() || rows.get(0) == null) {
+            return BigDecimal.ZERO;
+        }
+        Object value = rows.get(0);
+        if (value instanceof BigDecimal) {
+            return (BigDecimal) value;
+        }
+        return new BigDecimal(value.toString());
+    }
+
+    private List<AdminPaymentSummaryVO.ChannelItem> buildChannelSummary() {
+        Map<Integer, AdminPaymentSummaryVO.ChannelItem> channelMap = Arrays.stream(PayChannel.values())
+                .map(AdminPaymentSummaryVO.ChannelItem::empty)
+                .collect(Collectors.toMap(AdminPaymentSummaryVO.ChannelItem::getChannel, item -> item,
+                        (a, b) -> a, LinkedHashMap::new));
+
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<PayPaymentRecord> wrapper = Wrappers.query();
+        wrapper.select("channel, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS amount");
+        wrapper.groupBy("channel");
+        List<Map<String, Object>> rows = recordMapper.selectMaps(wrapper);
+        for (Map<String, Object> row : rows) {
+            Integer channel = toInteger(row.get("channel"));
+            if (channel == null) {
+                continue;
+            }
+            AdminPaymentSummaryVO.ChannelItem item = channelMap.computeIfAbsent(channel, key -> {
+                AdminPaymentSummaryVO.ChannelItem unknown = new AdminPaymentSummaryVO.ChannelItem();
+                unknown.setChannel(key);
+                unknown.setChannelDesc("未知渠道");
+                return unknown;
+            });
+            item.setCount(toLong(row.get("count")));
+            item.setAmount(toBigDecimal(row.get("amount")));
+        }
+        return new ArrayList<>(channelMap.values());
+    }
+
+    private BigDecimal percent(Long numerator, Long denominator) {
+        long down = denominator == null ? 0L : denominator;
+        if (down <= 0) {
+            return BigDecimal.ZERO;
+        }
+        long up = numerator == null ? 0L : numerator;
+        return BigDecimal.valueOf(up)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(BigDecimal.valueOf(down), 2, RoundingMode.HALF_UP);
+    }
+
+    private Long toLong(Object value) {
+        if (value == null) {
+            return 0L;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        return Long.parseLong(value.toString());
+    }
+
+    private Integer toInteger(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        return Integer.parseInt(value.toString());
+    }
+
+    private BigDecimal toBigDecimal(Object value) {
+        if (value == null) {
+            return BigDecimal.ZERO;
+        }
+        if (value instanceof BigDecimal) {
+            return (BigDecimal) value;
+        }
+        return new BigDecimal(value.toString());
+    }
+
+    private long safeLong(Long value) {
+        return value == null ? 0L : value;
     }
 
     private List<AdminPaymentVO> enrich(List<PayPaymentRecord> records) {

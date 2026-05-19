@@ -114,6 +114,38 @@
         <textarea v-model="remark" class="remark" maxlength="120" placeholder="选填，给商家的留言" />
       </view>
 
+      <view class="panel">
+        <view class="section-head">
+          <text>发票信息</text>
+          <text class="muted">{{ invoiceTypeLabel(invoiceForm.type) }}</text>
+        </view>
+        <view class="invoice-tabs">
+          <button :class="{ active: invoiceForm.type === 0 }" @tap="invoiceForm.type = 0">不开发票</button>
+          <button :class="{ active: invoiceForm.type === 1 }" @tap="invoiceForm.type = 1">个人</button>
+          <button :class="{ active: invoiceForm.type === 2 }" @tap="invoiceForm.type = 2">企业</button>
+        </view>
+        <view v-if="invoiceForm.type" class="invoice-form">
+          <input
+            v-model="invoiceForm.title"
+            class="field"
+            maxlength="100"
+            :placeholder="invoiceForm.type === 2 ? '企业名称' : '个人姓名 / 发票抬头'"
+          />
+          <input
+            v-if="invoiceForm.type === 2"
+            v-model="invoiceForm.taxNo"
+            class="field"
+            maxlength="32"
+            placeholder="纳税人识别号"
+          />
+          <input v-model="invoiceForm.email" class="field" maxlength="100" placeholder="接收邮箱（选填）" />
+          <input v-model="invoiceForm.content" class="field" maxlength="50" placeholder="发票内容，例如：商品明细" />
+        </view>
+        <text class="invoice-hint">
+          {{ invoiceForm.type ? '发票信息会随订单保存，后续由商家按订单开具。' : '本单不需要发票。' }}
+        </text>
+      </view>
+
       <view class="summary">
         <view>
           <text>商品金额</text>
@@ -221,6 +253,13 @@ const addressForm = reactive<AddressPayload>({
   detail: '',
   postCode: '',
   isDefault: 1,
+})
+const invoiceForm = reactive({
+  type: 0,
+  title: '',
+  taxNo: '',
+  email: '',
+  content: '商品明细',
 })
 
 const selectedItems = computed(() => cart.value.items.filter((item) => item.selected === 1 && !item.invalid))
@@ -424,10 +463,15 @@ async function submit() {
   }
   submitting.value = true
   try {
+    const invoiceInfo = buildInvoiceInfo()
+    if (invoiceInfo === false) {
+      return
+    }
     const res = await createOrder({
       addressId: selectedAddressId.value,
       remark: remark.value.trim() || undefined,
       couponId: selectedCoupon.value?.couponId,
+      invoiceInfo,
       items: directBuyMode.value
         ? selectedItems.value.map((item) => ({ skuId: item.skuId, quantity: item.quantity }))
         : undefined,
@@ -454,6 +498,33 @@ function specText(item: CartItem) {
 function couponValue(item: MyCoupon) {
   if (item.type === 2 && item.discountRate) return `${Number(item.discountRate).toFixed(1)}折`
   return `¥${Number(item.discountAmount || 0).toFixed(0)}`
+}
+
+function invoiceTypeLabel(type?: number) {
+  if (type === 1) return '个人'
+  if (type === 2) return '企业'
+  return '不开发票'
+}
+
+function buildInvoiceInfo() {
+  if (!invoiceForm.type) return undefined
+  const title = invoiceForm.title.trim()
+  const taxNo = invoiceForm.taxNo.trim()
+  if (!title) {
+    uni.showToast({ title: '请填写发票抬头', icon: 'none' })
+    return false
+  }
+  if (invoiceForm.type === 2 && !taxNo) {
+    uni.showToast({ title: '请填写企业税号', icon: 'none' })
+    return false
+  }
+  return {
+    type: invoiceForm.type,
+    title,
+    taxNo: invoiceForm.type === 2 ? taxNo : undefined,
+    email: invoiceForm.email.trim() || undefined,
+    content: invoiceForm.content.trim() || '商品明细',
+  }
 }
 
 function couponRule(item: MyCoupon) {
@@ -834,6 +905,45 @@ function normalizeImage(url?: string, seed = 'checkout') {
   background: #f3f4f6;
   box-sizing: border-box;
   font-size: 26rpx;
+}
+
+.invoice-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12rpx;
+  padding: 8rpx;
+  border-radius: 999rpx;
+  background: #f3f4f6;
+}
+
+.invoice-tabs button {
+  height: 62rpx;
+  margin: 0;
+  border-radius: 999rpx;
+  background: transparent;
+  color: #6b7280;
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 62rpx;
+}
+
+.invoice-tabs button.active {
+  background: #111827;
+  color: #fff;
+}
+
+.invoice-form {
+  display: grid;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+
+.invoice-hint {
+  display: block;
+  margin-top: 14rpx;
+  color: #6b7280;
+  font-size: 23rpx;
+  line-height: 1.55;
 }
 
 .summary view,

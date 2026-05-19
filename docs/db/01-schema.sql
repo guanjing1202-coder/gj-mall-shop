@@ -66,6 +66,26 @@ CREATE TABLE ums_user_favorite (
     UNIQUE KEY uk_user_spu (user_id, spu_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户收藏';
 
+DROP TABLE IF EXISTS ums_user_message;
+CREATE TABLE ums_user_message (
+    id              BIGINT          NOT NULL,
+    user_id         BIGINT          NOT NULL                COMMENT '用户ID',
+    type            VARCHAR(32)     NOT NULL DEFAULT 'system' COMMENT '消息类型 order/payment/logistics/after_sale/system',
+    title           VARCHAR(100)    NOT NULL                COMMENT '消息标题',
+    content         VARCHAR(1000)   DEFAULT NULL            COMMENT '消息内容',
+    biz_type        VARCHAR(32)     DEFAULT NULL            COMMENT '业务类型 order/after_sale',
+    biz_id          BIGINT          DEFAULT NULL            COMMENT '业务ID',
+    biz_no          VARCHAR(64)     DEFAULT NULL            COMMENT '业务单号',
+    read_status     TINYINT         NOT NULL DEFAULT 0      COMMENT '0未读 1已读',
+    read_time       DATETIME        DEFAULT NULL,
+    create_time     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted         TINYINT         NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    KEY idx_user_read (user_id, read_status, create_time),
+    KEY idx_biz (biz_type, biz_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户站内消息';
+
 -- =====================================================
 -- 商品 pms_*
 -- =====================================================
@@ -239,6 +259,7 @@ CREATE TABLE oms_order (
     delivery_no      VARCHAR(64)    DEFAULT NULL            COMMENT '物流单号',
     delivery_remark  VARCHAR(255)   DEFAULT NULL            COMMENT '发货备注',
     receiver_info   JSON            DEFAULT NULL            COMMENT '收货地址快照',
+    invoice_info    JSON            DEFAULT NULL            COMMENT '发票信息快照',
     remark          VARCHAR(500)    DEFAULT NULL,
     create_time     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -408,6 +429,33 @@ CREATE TABLE pay_payment_record (
     UNIQUE KEY uk_pay_no (pay_no),
     KEY idx_order (order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付记录';
+
+DROP TABLE IF EXISTS pay_callback_record;
+CREATE TABLE pay_callback_record (
+    id                  BIGINT          NOT NULL,
+    callback_no         VARCHAR(64)     NOT NULL                COMMENT '回调记录号',
+    channel             TINYINT         NOT NULL                COMMENT '1微信 2支付宝 3余额 9MOCK',
+    channel_name        VARCHAR(32)     NOT NULL                COMMENT '渠道名称',
+    pay_no              VARCHAR(64)     DEFAULT NULL            COMMENT '内部支付流水号',
+    third_pay_no        VARCHAR(64)     DEFAULT NULL            COMMENT '第三方流水号',
+    notify_id           VARCHAR(128)    DEFAULT NULL            COMMENT '第三方通知ID/事件ID',
+    event_type          VARCHAR(64)     DEFAULT NULL            COMMENT '事件类型',
+    amount              DECIMAL(10,2)   DEFAULT NULL            COMMENT '回调金额',
+    signature_status    TINYINT         NOT NULL DEFAULT 0      COMMENT '0跳过 1通过 2失败',
+    process_status      TINYINT         NOT NULL DEFAULT 0      COMMENT '0接收 1处理 2幂等忽略 3失败',
+    retry_count         INT             NOT NULL DEFAULT 0,
+    error_message       VARCHAR(500)    DEFAULT NULL,
+    raw_data            TEXT            DEFAULT NULL,
+    request_headers     TEXT            DEFAULT NULL,
+    create_time         DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_callback_no (callback_no),
+    KEY idx_pay_no (pay_no),
+    KEY idx_third_pay_no (third_pay_no),
+    KEY idx_notify (notify_id),
+    KEY idx_status (channel, process_status, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付渠道回调记录';
 
 -- =====================================================
 -- 系统/RBAC sys_*

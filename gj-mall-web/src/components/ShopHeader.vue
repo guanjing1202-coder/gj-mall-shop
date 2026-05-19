@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { ArrowDown, Search, ShoppingBag, UserFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Bell, Search, ShoppingBag, UserFilled } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
+import { getUnreadMessageCount } from '@/api/message'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,6 +13,7 @@ const auth = useAuthStore()
 const cart = useCartStore()
 const submitting = ref(false)
 const authMode = ref<'login' | 'register'>('login')
+const unreadMessages = ref(0)
 const loginForm = reactive({
   account: 'test',
   password: '123456',
@@ -78,12 +80,14 @@ async function handleLogout() {
 function handleAuthExpired() {
   auth.clearSession()
   cart.reset()
+  unreadMessages.value = 0
   auth.openLoginDialog()
 }
 
 function handleAuthRefreshed() {
   auth.hydrateSessionFromStorage()
   cart.fetchCart()
+  fetchUnreadMessages()
 }
 
 function goCart() {
@@ -126,6 +130,14 @@ function goHistory() {
   router.push('/history')
 }
 
+function goMessages() {
+  if (!auth.isLoggedIn) {
+    openLogin('login')
+    return
+  }
+  router.push('/messages')
+}
+
 function goAfterSales() {
   if (!auth.isLoggedIn) {
     openLogin('login')
@@ -155,6 +167,7 @@ onMounted(() => {
   window.addEventListener('mall-auth-refreshed', handleAuthRefreshed)
   if (auth.isLoggedIn) {
     cart.fetchCart()
+    fetchUnreadMessages()
   }
 })
 
@@ -162,6 +175,19 @@ onBeforeUnmount(() => {
   window.removeEventListener('mall-auth-expired', handleAuthExpired)
   window.removeEventListener('mall-auth-refreshed', handleAuthRefreshed)
 })
+
+async function fetchUnreadMessages() {
+  if (!auth.isLoggedIn) {
+    unreadMessages.value = 0
+    return
+  }
+  try {
+    const res = await getUnreadMessageCount()
+    unreadMessages.value = Number(res.data || 0)
+  } catch {
+    unreadMessages.value = 0
+  }
+}
 </script>
 
 <template>
@@ -196,6 +222,10 @@ onBeforeUnmount(() => {
           <el-icon aria-hidden="true"><ShoppingBag /></el-icon>
           <em v-if="cartCount">{{ cartCount > 99 ? '99+' : cartCount }}</em>
         </button>
+        <button class="icon-action cart-action" type="button" title="消息中心" aria-label="消息中心" @click="goMessages">
+          <el-icon aria-hidden="true"><Bell /></el-icon>
+          <em v-if="unreadMessages">{{ unreadMessages > 99 ? '99+' : unreadMessages }}</em>
+        </button>
         <button v-if="!auth.isLoggedIn" class="account-action" type="button" @click="openLogin('login')">
           <el-icon aria-hidden="true"><UserFilled /></el-icon>
           <span>登录</span>
@@ -212,6 +242,7 @@ onBeforeUnmount(() => {
               <el-dropdown-item @click="goCart">我的购物车</el-dropdown-item>
               <el-dropdown-item @click="goOrders">我的订单</el-dropdown-item>
               <el-dropdown-item @click="goCoupons">我的优惠券</el-dropdown-item>
+              <el-dropdown-item @click="goMessages">消息中心</el-dropdown-item>
               <el-dropdown-item @click="goFavorites">我的收藏</el-dropdown-item>
               <el-dropdown-item @click="goHistory">浏览足迹</el-dropdown-item>
               <el-dropdown-item @click="goAddresses">收货地址</el-dropdown-item>

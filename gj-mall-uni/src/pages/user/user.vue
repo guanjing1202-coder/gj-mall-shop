@@ -63,6 +63,7 @@ import { getMyCoupons } from '@/api/coupon'
 import { uploadImage } from '@/api/file'
 import { getFavoritePage } from '@/api/favorite'
 import { getHistoryPage } from '@/api/history'
+import { getUnreadMessageCount } from '@/api/message'
 import { getAfterSalePage, getOrderPage } from '@/api/order'
 import { clearLoginState, hasRecoverableLoginState, saveLoginTokens } from '@/utils/auth'
 import { syncSession } from '@/utils/session'
@@ -90,6 +91,7 @@ const statValues = reactive({
   afterSales: 0,
   favorites: 0,
   histories: 0,
+  messages: 0,
 })
 
 const profileForm = reactive({
@@ -111,6 +113,7 @@ const stats = computed(() => [
   { label: '优惠券', value: statValues.coupons, path: '/pages/coupon/center' },
   { label: '收藏', value: statValues.favorites, path: '/pages/favorite/list' },
   { label: '足迹', value: statValues.histories, path: '/pages/history/list' },
+  { label: '消息', value: statValues.messages, path: '/pages/message/list' },
   { label: '购物车', value: statValues.cart, path: '/pages/cart/cart' },
 ])
 
@@ -119,6 +122,7 @@ const shortcuts = [
   { label: '我的订单', icon: '单', path: '/pages/orders/list' },
   { label: '我的收藏', icon: '藏', path: '/pages/favorite/list' },
   { label: '我的足迹', icon: '迹', path: '/pages/history/list' },
+  { label: '消息中心', icon: '信', path: '/pages/message/list' },
   { label: '领券中心', icon: '券', path: '/pages/coupon/center' },
   { label: '限时秒杀', icon: '秒', path: '/pages/seckill/list' },
   { label: '售后进度', icon: '售', path: '/pages/after-sales/list' },
@@ -181,6 +185,7 @@ async function loadStats() {
     getAfterSalePage({ pageNum: 1, pageSize: 1 }),
     getFavoritePage({ current: 1, size: 1 }),
     getHistoryPage({ current: 1, size: 1 }),
+    getUnreadMessageCount(),
   ])
   if (jobs[0].status === 'fulfilled') statValues.orders = Number(jobs[0].value.data?.total || 0)
   if (jobs[1].status === 'fulfilled') statValues.coupons = jobs[1].value.data?.length || 0
@@ -189,6 +194,7 @@ async function loadStats() {
   if (jobs[4].status === 'fulfilled') statValues.afterSales = Number(jobs[4].value.data?.total || 0)
   if (jobs[5].status === 'fulfilled') statValues.favorites = Number(jobs[5].value.data?.total || 0)
   if (jobs[6].status === 'fulfilled') statValues.histories = Number(jobs[6].value.data?.total || 0)
+  if (jobs[7].status === 'fulfilled') statValues.messages = Number(jobs[7].value.data || 0)
 }
 
 async function saveProfile() {
@@ -241,7 +247,7 @@ async function signOut() {
 function resetUserState() {
   profile.value = undefined
   isLoggedIn.value = false
-  Object.assign(statValues, { orders: 0, coupons: 0, cart: 0, addresses: 0, afterSales: 0, favorites: 0, histories: 0 })
+  Object.assign(statValues, { orders: 0, coupons: 0, cart: 0, addresses: 0, afterSales: 0, favorites: 0, histories: 0, messages: 0 })
   fillProfileForm()
 }
 

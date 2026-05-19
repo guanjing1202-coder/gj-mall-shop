@@ -16,6 +16,7 @@ import com.gj.mall.common.result.PageResult;
 import com.gj.mall.order.dto.CreateOrderDTO;
 import com.gj.mall.order.dto.CreateOrderItemDTO;
 import com.gj.mall.order.dto.AdminOrderDeliverDTO;
+import com.gj.mall.order.dto.InvoiceInfoDTO;
 import com.gj.mall.order.dto.OrderQueryDTO;
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.entity.OmsOrderItem;
@@ -25,6 +26,7 @@ import com.gj.mall.order.mapper.OmsOrderMapper;
 import com.gj.mall.order.mq.OrderTimeoutProducer;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.order.vo.OrderItemVO;
+import com.gj.mall.order.vo.InvoiceVO;
 import com.gj.mall.order.vo.OrderLogisticsTraceVO;
 import com.gj.mall.order.vo.OrderLogisticsVO;
 import com.gj.mall.order.vo.OrderVO;
@@ -39,6 +41,7 @@ import com.gj.mall.product.mapper.PmsSpuMapper;
 import com.gj.mall.product.service.SkuService;
 import com.gj.mall.user.entity.UmsUserAddress;
 import com.gj.mall.user.service.UserAddressService;
+import com.gj.mall.user.service.UserMessageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -63,6 +66,7 @@ public class OrderServiceImpl implements OrderService {
     private final OrderTimeoutProducer timeoutProducer;
     private final CouponService couponService;
     private final PmsSpuMapper spuMapper;
+    private final UserMessageService messageService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -117,6 +121,10 @@ public class OrderServiceImpl implements OrderService {
         order.setCouponAmount(coupon);
         order.setStatus(OrderStatus.PENDING_PAY.getCode());
         order.setReceiverInfo(JSON.toJSONString(receiver));
+        InvoiceVO invoice = normalizeInvoice(dto.getInvoiceInfo());
+        if (invoice != null) {
+            order.setInvoiceInfo(JSON.toJSONString(invoice));
+        }
         order.setRemark(dto.getRemark());
         order.setCouponUserId(couponResult.getCouponUserId());  // 可为 null
         orderMapper.insert(order);
@@ -154,6 +162,7 @@ public class OrderServiceImpl implements OrderService {
         }
 
         log.info("[order] created orderNo={} userId={} payAmount={}", orderNo, userId, payAmount);
+        notifyUser(order.getUserId(), "order", "订单已提交", "订单 " + order.getOrderNo() + " 已提交，请及时完成支付。", "order", order.getId(), order.getOrderNo());
         return orderNo;
     }
 
@@ -227,6 +236,30 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    private InvoiceVO normalizeInvoice(InvoiceInfoDTO dto) {
+        if (dto == null || dto.getType() == null || Integer.valueOf(0).equals(dto.getType())) {
+            return null;
+        }
+        if (!Integer.valueOf(1).equals(dto.getType()) && !Integer.valueOf(2).equals(dto.getType())) {
+            throw new BizException(ResultCode.PARAM_ERROR, "发票类型非法");
+        }
+        String title = StrUtil.trim(dto.getTitle());
+        if (StrUtil.isBlank(title)) {
+            throw new BizException(ResultCode.PARAM_MISSING, "请填写发票抬头");
+        }
+        String taxNo = StrUtil.trim(dto.getTaxNo());
+        if (Integer.valueOf(2).equals(dto.getType()) && StrUtil.isBlank(taxNo)) {
+            throw new BizException(ResultCode.PARAM_MISSING, "企业发票请填写纳税人识别号");
+        }
+        InvoiceVO vo = new InvoiceVO();
+        vo.setType(dto.getType());
+        vo.setTitle(StrUtil.sub(title, 0, 100));
+        vo.setTaxNo(StrUtil.isBlank(taxNo) ? null : StrUtil.sub(taxNo, 0, 32));
+        vo.setEmail(StrUtil.isBlank(dto.getEmail()) ? null : StrUtil.sub(StrUtil.trim(dto.getEmail()), 0, 100));
+        vo.setContent(StrUtil.sub(StrUtil.blankToDefault(StrUtil.trim(dto.getContent()), "商品明细"), 0, 50));
+        return vo;
+    }
+
     private int findQty(List<CartItemVO> items, Long skuId) {
         return items.stream().filter(i -> i.getSkuId().equals(skuId))
                 .findFirst().map(CartItemVO::getQuantity).orElse(0);
@@ -270,6 +303,7 @@ public class OrderServiceImpl implements OrderService {
         upd.setId(order.getId());
         upd.setStatus(OrderStatus.CANCELED.getCode());
         orderMapper.updateById(upd);
+        notifyUser(order.getUserId(), "order", "订单已取消", "订单 " + order.getOrderNo() + " 已取消，锁定库存和优惠券已释放。", "order", order.getId(), order.getOrderNo());
     }
 
     @Override
@@ -361,6 +395,8 @@ public class OrderServiceImpl implements OrderService {
         vo.setDeliveryCompany(order.getDeliveryCompany());
         vo.setDeliveryNo(order.getDeliveryNo());
         vo.setDeliveryRemark(order.getDeliveryRemark());
+        vo.setCurrentAction(logisticsCurrentAction(order));
+        vo.setNextHint(logisticsNextHint(order));
         vo.setTraces(buildLogisticsTraces(order));
         return vo;
     }
@@ -421,6 +457,58 @@ public class OrderServiceImpl implements OrderService {
         return desc.toString();
     }
 
+    private String logisticsCurrentAction(OmsOrder order) {
+        OrderStatus status = OrderStatus.of(order.getStatus());
+        if (status == null) {
+            return "订单履约中";
+        }
+        switch (status) {
+            case PENDING_PAY:
+                return "等待付款";
+            case PENDING_DELIVERY:
+                return "等待商家发货";
+            case PENDING_RECEIVE:
+                return "包裹运输中";
+            case COMPLETED:
+                return "交易已完成";
+            case CANCELED:
+                return "订单已取消";
+            case REFUNDING:
+                return "售后处理中";
+            case REFUNDED:
+                return "退款已完成";
+            default:
+                return status.getDesc();
+        }
+    }
+
+    private String logisticsNextHint(OmsOrder order) {
+        OrderStatus status = OrderStatus.of(order.getStatus());
+        if (status == null) {
+            return "请关注订单状态变化";
+        }
+        switch (status) {
+            case PENDING_PAY:
+                return "完成支付后，商家会进入发货流程";
+            case PENDING_DELIVERY:
+                return "商家会尽快打包发货，发货后这里会展示物流公司和单号";
+            case PENDING_RECEIVE:
+                return StrUtil.isBlank(order.getDeliveryNo())
+                        ? "订单已发货，请留意包裹配送和签收"
+                        : "请凭物流单号关注配送进度，收到商品后记得确认收货";
+            case COMPLETED:
+                return "订单已完成，可以评价商品或申请售后服务";
+            case CANCELED:
+                return "订单已取消，未进入后续配送流程";
+            case REFUNDING:
+                return "售后申请正在处理中，请关注退款进度";
+            case REFUNDED:
+                return "退款流程已完成，如有疑问可联系商家";
+            default:
+                return "请关注订单状态变化";
+        }
+    }
+
     private OrderVO detailVO(OmsOrder order) {
         List<OmsOrderItem> items = itemMapper.selectList(
                 Wrappers.<OmsOrderItem>lambdaQuery().eq(OmsOrderItem::getOrderId, order.getId()));
@@ -463,6 +551,7 @@ public class OrderServiceImpl implements OrderService {
         upd.setPayTime(LocalDateTime.now());
         orderMapper.updateById(upd);
         log.info("[order] mark paid orderId={} payType={}", orderId, payType);
+        notifyUser(order.getUserId(), "payment", "支付成功", "订单 " + order.getOrderNo() + " 已支付成功，商家将尽快为你发货。", "order", order.getId(), order.getOrderNo());
     }
 
     @Override
@@ -491,6 +580,7 @@ public class OrderServiceImpl implements OrderService {
         orderMapper.updateById(upd);
         List<OmsOrderItem> items = itemMapper.selectList(
                 Wrappers.<OmsOrderItem>lambdaQuery().eq(OmsOrderItem::getOrderId, orderId));
+        notifyUser(order.getUserId(), "logistics", "订单已发货", "订单 " + order.getOrderNo() + " 已由 " + upd.getDeliveryCompany() + " 发出，物流单号：" + upd.getDeliveryNo() + "。", "order", order.getId(), order.getOrderNo());
         return toOrderVO(orderMapper.selectById(orderId),
                 items.stream().map(this::toItemVO).collect(Collectors.toList()));
     }
@@ -507,6 +597,7 @@ public class OrderServiceImpl implements OrderService {
         upd.setStatus(OrderStatus.COMPLETED.getCode());
         upd.setReceiveTime(LocalDateTime.now());
         orderMapper.updateById(upd);
+        notifyUser(order.getUserId(), "order", "交易已完成", "订单 " + order.getOrderNo() + " 已确认收货，可以去评价商品或申请售后。", "order", order.getId(), order.getOrderNo());
     }
 
     private OmsOrder mustOwn(Long userId, Long orderId) {
@@ -537,6 +628,11 @@ public class OrderServiceImpl implements OrderService {
         if (StrUtil.isNotBlank(o.getReceiverInfo())) {
             try {
                 vo.setReceiver(JSON.parseObject(o.getReceiverInfo(), ReceiverVO.class));
+            } catch (Exception ignored) {}
+        }
+        if (StrUtil.isNotBlank(o.getInvoiceInfo())) {
+            try {
+                vo.setInvoice(JSON.parseObject(o.getInvoiceInfo(), InvoiceVO.class));
             } catch (Exception ignored) {}
         }
         vo.setItems(items);
@@ -590,7 +686,16 @@ public class OrderServiceImpl implements OrderService {
             log.warn("[seckill-order] send timeout MQ failed, orderId={}", order.getId(), e);
         }
         log.info("[seckill] order created orderNo={} userId={}", orderNo, userId);
+        notifyUser(order.getUserId(), "order", "秒杀订单已提交", "秒杀订单 " + order.getOrderNo() + " 已提交，请及时完成支付。", "order", order.getId(), order.getOrderNo());
         return orderNo;
+    }
+
+    private void notifyUser(Long userId, String type, String title, String content, String bizType, Long bizId, String bizNo) {
+        try {
+            messageService.create(userId, type, title, content, bizType, bizId, bizNo);
+        } catch (Exception ex) {
+            log.warn("[message] create user message failed userId={} bizType={} bizId={}", userId, bizType, bizId, ex);
+        }
     }
 
     private String genOrderNo(Long userId) {

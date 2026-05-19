@@ -3,6 +3,7 @@ import { getCurrentAdminPermissions } from '@/api/adminUser'
 
 const routePermissions: Record<string, string> = {
   Dashboard: 'menu.dashboard',
+  Report: 'menu.dashboard',
   Product: 'product.spu.manage',
   ProductBrand: 'product.brand.manage',
   ProductCategory: 'product.category.manage',
@@ -40,6 +41,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Dashboard',
         component: () => import('@/views/DashboardView.vue'),
         meta: { title: '仪表盘', permission: routePermissions.Dashboard },
+      },
+      {
+        path: 'report',
+        name: 'Report',
+        component: () => import('@/views/report/SalesReportView.vue'),
+        meta: { title: '经营报表', permission: routePermissions.Report },
       },
       {
         path: 'product',

@@ -20,6 +20,7 @@ import com.gj.mall.order.mapper.OmsOrderItemMapper;
 import com.gj.mall.order.mapper.OmsOrderMapper;
 import com.gj.mall.order.service.AfterSaleService;
 import com.gj.mall.order.vo.AfterSaleVO;
+import com.gj.mall.user.service.UserMessageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +48,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
     private final OmsAfterSaleMapper afterSaleMapper;
     private final OmsOrderMapper orderMapper;
     private final OmsOrderItemMapper orderItemMapper;
+    private final UserMessageService messageService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -83,6 +85,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         afterSaleMapper.insert(afterSale);
 
         updateOrderStatus(order.getId(), OrderStatus.REFUNDING.getCode());
+        notifyUser(userId, "after_sale", "售后申请已提交", "售后单 " + afterSale.getAfterSaleNo() + " 已提交，商家会尽快审核。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
         return enrich(Collections.singletonList(afterSale)).get(0);
     }
 
@@ -131,6 +134,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         update.setStatus(STATUS_CANCELED);
         afterSaleMapper.updateById(update);
         restoreOrderStatus(afterSale);
+        notifyUser(userId, "after_sale", "售后申请已取消", "售后单 " + afterSale.getAfterSaleNo() + " 已取消，订单状态已恢复。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
     }
 
     @Override
@@ -148,6 +152,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         update.setReturnCompany(StrUtil.sub(StrUtil.trim(dto.getReturnCompany()), 0, 64));
         update.setReturnNo(StrUtil.sub(StrUtil.trim(dto.getReturnNo()), 0, 64));
         afterSaleMapper.updateById(update);
+        notifyUser(userId, "after_sale", "退货物流已提交", "售后单 " + afterSale.getAfterSaleNo() + " 已提交退货物流，等待商家确认收货。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
     }
 
     private void validateApplyDTO(AfterSaleApplyDTO dto) {
@@ -221,5 +226,12 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         String tail = String.format("%04d", userId == null ? 0 : userId % 10000);
         String rnd = String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
         return "AS" + ts + tail + rnd;
+    }
+
+    private void notifyUser(Long userId, String type, String title, String content, String bizType, Long bizId, String bizNo) {
+        try {
+            messageService.create(userId, type, title, content, bizType, bizId, bizNo);
+        } catch (Exception ignored) {
+        }
     }
 }

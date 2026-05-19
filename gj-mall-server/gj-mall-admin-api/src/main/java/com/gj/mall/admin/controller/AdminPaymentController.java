@@ -1,8 +1,12 @@
 package com.gj.mall.admin.controller;
 
+import com.gj.mall.admin.dto.AdminPaymentCallbackQueryDTO;
 import com.gj.mall.admin.dto.AdminPaymentQueryDTO;
 import com.gj.mall.admin.dto.AdminPaymentRefundDTO;
 import com.gj.mall.admin.service.AdminPaymentService;
+import com.gj.mall.admin.vo.AdminPaymentAccessVO;
+import com.gj.mall.admin.vo.AdminPaymentCallbackVO;
+import com.gj.mall.admin.vo.AdminPaymentSummaryVO;
 import com.gj.mall.admin.vo.AdminPaymentVO;
 import com.gj.mall.common.result.PageResult;
 import com.gj.mall.common.result.Result;
@@ -18,6 +22,24 @@ import org.springframework.web.bind.annotation.*;
 public class AdminPaymentController {
 
     private final AdminPaymentService paymentService;
+
+    @Operation(summary = "支付运营汇总")
+    @GetMapping("/summary")
+    public Result<AdminPaymentSummaryVO> summary() {
+        return Result.success(paymentService.summary());
+    }
+
+    @Operation(summary = "支付接入状态")
+    @GetMapping("/access")
+    public Result<AdminPaymentAccessVO> access() {
+        return Result.success(paymentService.access());
+    }
+
+    @Operation(summary = "支付回调记录分页")
+    @GetMapping("/callback/page")
+    public Result<PageResult<AdminPaymentCallbackVO>> callbackPage(AdminPaymentCallbackQueryDTO query) {
+        return Result.success(paymentService.callbackPage(query));
+    }
 
     @Operation(summary = "支付记录分页")
     @GetMapping("/page")

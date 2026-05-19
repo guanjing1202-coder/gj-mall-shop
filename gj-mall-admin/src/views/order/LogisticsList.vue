@@ -113,6 +113,48 @@ const statusOptions = [
 ]
 
 const defaultCompanyName = computed(() => companyOptions.value[0]?.name || '顺丰速运')
+const overdueTotal = computed(() => Number(summary.overdueDeliveryCount || 0) + Number(summary.overdueReceiveCount || 0))
+const overdueAmount = computed(() => Number(summary.overdueDeliveryAmount || 0) + Number(summary.overdueReceiveAmount || 0))
+const logisticsCards = computed(() => [
+  {
+    label: '待发货',
+    value: formatNumber(summary.pendingDeliveryCount),
+    desc: formatAmount(summary.pendingDeliveryAmount),
+    tone: 'amber',
+    status: 1,
+  },
+  {
+    label: '待收货',
+    value: formatNumber(summary.pendingReceiveCount),
+    desc: formatAmount(summary.pendingReceiveAmount),
+    tone: 'blue',
+    status: 2,
+  },
+  {
+    label: '今日发货',
+    value: formatNumber(summary.shippedTodayCount),
+    desc: formatAmount(summary.shippedTodayAmount),
+    tone: 'teal',
+  },
+  {
+    label: '今日收货',
+    value: formatNumber(summary.receivedTodayCount),
+    desc: formatAmount(summary.receivedTodayAmount),
+    tone: 'green',
+  },
+  {
+    label: '履约预警',
+    value: formatNumber(overdueTotal.value),
+    desc: formatAmount(overdueAmount.value),
+    tone: 'red',
+  },
+  {
+    label: '启用物流公司',
+    value: formatNumber(summary.activeCompanyCount),
+    desc: '可用于发货',
+    tone: 'slate',
+  },
+])
 
 onMounted(async () => {
   await Promise.all([fetchSummary(), fetchOrders(), fetchCompanies(), fetchCompanyOptions()])
@@ -396,26 +438,26 @@ function toCompany(record: Record<string, any>) {
     </section>
 
     <section class="metric-grid" :class="{ faded: summaryLoading }">
-      <button type="button" class="metric-card accent-amber" :class="{ active: orderFilters.status === 1 }" @click="applyStatus(1)">
-        <span>待发货</span>
-        <strong>{{ formatNumber(summary.pendingDeliveryCount) }}</strong>
-        <em>{{ formatAmount(summary.pendingDeliveryAmount) }}</em>
-      </button>
-      <button type="button" class="metric-card accent-blue" :class="{ active: orderFilters.status === 2 }" @click="applyStatus(2)">
-        <span>待收货</span>
-        <strong>{{ formatNumber(summary.pendingReceiveCount) }}</strong>
-        <em>运输中订单</em>
-      </button>
-      <div class="metric-card accent-teal">
-        <span>今日发货</span>
-        <strong>{{ formatNumber(summary.shippedTodayCount) }}</strong>
-        <em>已交付承运</em>
-      </div>
-      <div class="metric-card accent-slate">
-        <span>启用物流公司</span>
-        <strong>{{ formatNumber(summary.activeCompanyCount) }}</strong>
-        <em>可用于发货</em>
-      </div>
+      <component
+        :is="card.status ? 'button' : 'div'"
+        v-for="card in logisticsCards"
+        :key="card.label"
+        type="button"
+        class="metric-card"
+        :class="[`accent-${card.tone}`, { active: card.status && orderFilters.status === card.status }]"
+        @click="card.status && applyStatus(card.status)"
+      >
+        <span>{{ card.label }}</span>
+        <strong>{{ card.value }}</strong>
+        <em>{{ card.desc }}</em>
+      </component>
+    </section>
+
+    <section v-if="overdueTotal > 0" class="warning-strip">
+      <strong>履约预警</strong>
+      <span>有 {{ formatNumber(summary.overdueDeliveryCount) }} 个订单付款超过 24 小时仍未发货，{{ formatNumber(summary.overdueReceiveCount) }} 个订单发货超过 7 天仍未收货。</span>
+      <a-button size="small" @click="applyStatus(1)">查看待发货</a-button>
+      <a-button size="small" @click="applyStatus(2)">查看待收货</a-button>
     </section>
 
     <section class="logistics-panel">
@@ -683,7 +725,7 @@ function toCompany(record: Record<string, any>) {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -736,12 +778,41 @@ button.metric-card:hover {
   border-top: 3px solid #0f766e;
 }
 
+.accent-green {
+  border-top: 3px solid #15803d;
+}
+
+.accent-red {
+  border-top: 3px solid #dc2626;
+}
+
 .accent-slate {
   border-top: 3px solid #526171;
 }
 
 .faded {
   opacity: 0.72;
+}
+
+.warning-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.warning-strip strong {
+  color: #7c2d12;
+}
+
+.warning-strip span {
+  flex: 1;
+  min-width: 0;
 }
 
 .logistics-panel {
@@ -838,7 +909,7 @@ button.metric-card:hover {
 
 @media (max-width: 1100px) {
   .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -850,6 +921,11 @@ button.metric-card:hover {
 
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .warning-strip {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .filter-input,

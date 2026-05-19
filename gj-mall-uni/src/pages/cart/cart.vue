@@ -46,6 +46,14 @@
       </view>
     </view>
 
+    <view v-if="isLoggedIn && cart.items.length" class="coupon-tip" :class="{ active: bestCoupon, pending: closestCoupon && !bestCoupon }">
+      <view>
+        <text>{{ couponHintTitle }}</text>
+        <text>{{ couponHintDesc }}</text>
+      </view>
+      <button v-if="bestCoupon || closestCoupon" @tap="handleCouponTipTap">{{ bestCoupon ? '去使用' : '去凑单' }}</button>
+    </view>
+
     <view v-if="isLoggedIn && cart.items.length" class="settle-bar">
       <view class="select-all" @tap="toggleAll">
         <view class="select-dot" :class="{ active: allSelected }" />
@@ -72,6 +80,7 @@ import {
   type CartInfo,
   type CartItem,
 } from '@/api/cart'
+import { getCheckoutCoupons, type MyCoupon } from '@/api/coupon'
 import { syncSession } from '@/utils/session'
 
 const emptyCart = (): CartInfo => ({
@@ -82,21 +91,46 @@ const emptyCart = (): CartInfo => ({
 })
 
 const loading = ref(false)
+const couponLoading = ref(false)
 const isLoggedIn = ref(false)
 const cart = ref<CartInfo>(emptyCart())
+const coupons = ref<MyCoupon[]>([])
 
 const allSelected = computed(() => {
   const validItems = cart.value.items.filter((item) => !item.invalid)
   return Boolean(validItems.length) && validItems.every((item) => item.selected === 1)
+})
+const usableCoupons = computed(() => coupons.value.filter(isCouponUsable))
+const bestCoupon = computed(() => [...usableCoupons.value].sort((a, b) => couponDiscountValue(b) - couponDiscountValue(a))[0])
+const closestCoupon = computed(() => {
+  return coupons.value
+    .filter((item) => !isCouponUsable(item) && Number(item.amountGap || 0) > 0)
+    .sort((a, b) => Number(a.amountGap || 0) - Number(b.amountGap || 0))[0]
+})
+const couponHintTitle = computed(() => {
+  if (couponLoading.value) return '优惠券计算中'
+  if (!cart.value.selectedCount) return '选中商品后匹配优惠'
+  if (bestCoupon.value) return `预计可省 ${formatPrice(couponDiscountValue(bestCoupon.value))}`
+  if (closestCoupon.value) return `还差 ${formatPrice(closestCoupon.value.amountGap)} 可用券`
+  return coupons.value.length ? '暂无满足条件的优惠券' : '暂无可用优惠券'
+})
+const couponHintDesc = computed(() => {
+  if (couponLoading.value) return '正在按当前已选金额重新匹配'
+  if (!cart.value.selectedCount) return '先勾选商品，系统会提前提示可用券'
+  if (bestCoupon.value) return `${bestCoupon.value.name} · ${couponValue(bestCoupon.value)}`
+  if (closestCoupon.value) return closestCoupon.value.unavailableReason || `${closestCoupon.value.name} 提高已选金额后可用`
+  return '可以去领券中心看看是否有更合适的券'
 })
 
 onShow(async () => {
   isLoggedIn.value = await syncSession()
   if (!isLoggedIn.value) {
     cart.value = emptyCart()
+    coupons.value = []
     return
   }
   await loadCart()
+  await loadCouponHints()
 })
 
 async function loadCart() {
@@ -109,15 +143,31 @@ async function loadCart() {
   }
 }
 
+async function loadCouponHints() {
+  if (!isLoggedIn.value || !cart.value.selectedCount || Number(cart.value.selectedAmount || 0) <= 0) {
+    coupons.value = []
+    return
+  }
+  couponLoading.value = true
+  try {
+    const res = await getCheckoutCoupons(Number(cart.value.selectedAmount || 0))
+    coupons.value = res.data || []
+  } finally {
+    couponLoading.value = false
+  }
+}
+
 async function toggleItem(item: CartItem) {
   if (item.invalid) return
   await updateCart({ skuId: item.skuId, selected: item.selected === 1 ? 0 : 1 })
   await loadCart()
+  await loadCouponHints()
 }
 
 async function toggleAll() {
   await selectAllCart(!allSelected.value)
   await loadCart()
+  await loadCouponHints()
 }
 
 async function changeQuantity(item: CartItem, step: number) {
@@ -125,20 +175,31 @@ async function changeQuantity(item: CartItem, step: number) {
   if (next === item.quantity) return
   await updateCart({ skuId: item.skuId, quantity: next })
   await loadCart()
+  await loadCouponHints()
 }
 
 async function removeItem(item: CartItem) {
   await removeCartItem(item.skuId)
   await loadCart()
+  await loadCouponHints()
 }
 
 async function clearAll() {
   await clearCart()
   await loadCart()
+  await loadCouponHints()
 }
 
 function checkout() {
   uni.navigateTo({ url: '/pages/checkout/checkout' })
+}
+
+function handleCouponTipTap() {
+  if (bestCoupon.value) {
+    checkout()
+    return
+  }
+  goHome()
 }
 
 function goLogin() {
@@ -160,6 +221,28 @@ function specText(item: CartItem) {
   return specs || item.skuName || '默认规格'
 }
 
+function isCouponUsable(item: MyCoupon) {
+  return item.usable !== false && Number(item.status ?? 0) === 0
+}
+
+function couponDiscountValue(item: MyCoupon) {
+  return Number(item.discountEstimate ?? calcCouponDiscount(item, Number(cart.value.selectedAmount || 0)))
+}
+
+function calcCouponDiscount(coupon: MyCoupon, amount: number) {
+  if (amount <= 0) return 0
+  if (coupon.type === 2) {
+    const rate = Number(coupon.discountRate ?? 1)
+    return Math.min(amount, Math.max(0, amount - amount * rate))
+  }
+  return Math.min(amount, Number(coupon.discountAmount || 0))
+}
+
+function couponValue(item: MyCoupon) {
+  if (item.type === 2 && item.discountRate) return `${Number(item.discountRate * 10).toFixed(1).replace(/\.0$/, '')}折`
+  return `减${formatPrice(item.discountAmount)}`
+}
+
 function formatPrice(value?: number) {
   return `¥${Number(value || 0).toFixed(0)}`
 }
@@ -175,7 +258,7 @@ function normalizeImage(url?: string, seed = 'cart') {
 <style lang="scss">
 .page {
   min-height: 100vh;
-  padding: 24rpx 24rpx 144rpx;
+  padding: 24rpx 24rpx 210rpx;
   background: #f7f8f5;
   color: #111827;
 }
@@ -382,6 +465,69 @@ function normalizeImage(url?: string, seed = 'cart') {
   color: #6b7280;
   font-size: 22rpx;
   line-height: 44rpx;
+}
+
+.coupon-tip {
+  position: fixed;
+  right: 22rpx;
+  bottom: calc(112rpx + env(safe-area-inset-bottom));
+  left: 22rpx;
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  padding: 18rpx 20rpx;
+  border: 2rpx solid rgba(17, 24, 39, 0.06);
+  border-radius: 18rpx;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 -8rpx 24rpx rgba(15, 23, 42, 0.08);
+}
+
+.coupon-tip.active {
+  border-color: rgba(47, 143, 103, 0.25);
+  background: #eef8f2;
+}
+
+.coupon-tip.pending {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: #fff7ed;
+}
+
+.coupon-tip view {
+  min-width: 0;
+}
+
+.coupon-tip text {
+  display: block;
+}
+
+.coupon-tip text:first-child {
+  color: #111827;
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.coupon-tip text:last-child {
+  overflow: hidden;
+  margin-top: 6rpx;
+  color: #6b7280;
+  font-size: 22rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coupon-tip button {
+  flex: 0 0 auto;
+  height: 56rpx;
+  margin: 0;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: #111827;
+  color: #fff;
+  font-size: 22rpx;
+  font-weight: 900;
+  line-height: 56rpx;
 }
 
 .settle-bar {

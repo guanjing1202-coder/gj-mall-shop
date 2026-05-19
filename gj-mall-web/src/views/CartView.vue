@@ -1,19 +1,61 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import ShopHeader from '@/components/ShopHeader.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import type { CartItem } from '@/api/cart'
+import { getCheckoutCoupons, type MyCoupon } from '@/api/coupon'
 
 const auth = useAuthStore()
 const cart = useCartStore()
 const router = useRouter()
+const couponLoading = ref(false)
+const cartCoupons = ref<MyCoupon[]>([])
 
 const allSelected = computed({
   get: () => cart.hasItems && cart.items.every((item) => item.selected === 1 || item.invalid),
   set: (value: boolean) => cart.selectAll(value),
+})
+const usableCoupons = computed(() => cartCoupons.value.filter(isCouponUsable))
+const bestCoupon = computed(() => {
+  return [...usableCoupons.value].sort((a, b) => couponDiscountValue(b) - couponDiscountValue(a))[0]
+})
+const closestCoupon = computed(() => {
+  return cartCoupons.value
+    .filter((item) => !isCouponUsable(item) && Number(item.amountGap || 0) > 0)
+    .sort((a, b) => Number(a.amountGap || 0) - Number(b.amountGap || 0))[0]
+})
+const couponHintTitle = computed(() => {
+  if (couponLoading.value) {
+    return '优惠券计算中'
+  }
+  if (!cart.selectedCount) {
+    return '选中商品后匹配优惠'
+  }
+  if (bestCoupon.value) {
+    return `预计可省 ${formatPrice(couponDiscountValue(bestCoupon.value))}`
+  }
+  if (closestCoupon.value) {
+    return `还差 ${formatPrice(closestCoupon.value.amountGap)} 可用券`
+  }
+  return cartCoupons.value.length ? '暂无满足条件的优惠券' : '暂无可用优惠券'
+})
+const couponHintDesc = computed(() => {
+  if (couponLoading.value) {
+    return '正在按当前已选金额重新匹配'
+  }
+  if (!cart.selectedCount) {
+    return '先勾选要结算的商品，系统会提前提示可用券'
+  }
+  if (bestCoupon.value) {
+    return `${bestCoupon.value.name} · ${formatCouponValue(bestCoupon.value)} · 结算页将自动推荐`
+  }
+  if (closestCoupon.value) {
+    return `${closestCoupon.value.name} · ${formatCouponValue(closestCoupon.value)} · ${closestCoupon.value.unavailableReason || '提高已选金额后可用'}`
+  }
+  return cartCoupons.value.length ? '可以前往领券中心看看是否有更合适的券' : '当前账户暂时没有可参与结算的优惠券'
 })
 
 function formatPrice(value?: number) {
@@ -39,6 +81,47 @@ function handleImageError(event: Event, seed: string) {
 function specText(item: CartItem) {
   const values = item.specData ? Object.values(item.specData).filter(Boolean) : []
   return values.length ? values.join(' / ') : item.skuName || '默认规格'
+}
+
+function isCouponUsable(coupon: MyCoupon) {
+  return coupon.usable !== false && Number(coupon.status ?? 0) === 0
+}
+
+function couponDiscountValue(coupon: MyCoupon) {
+  return Number(coupon.discountEstimate ?? calcCouponDiscount(coupon, cart.selectedAmount))
+}
+
+function calcCouponDiscount(coupon: MyCoupon, amount: number) {
+  if (amount <= 0) {
+    return 0
+  }
+  if (coupon.type === 2) {
+    const rate = Number(coupon.discountRate ?? 1)
+    return Math.min(amount, Math.max(0, amount - amount * rate))
+  }
+  return Math.min(amount, Number(coupon.discountAmount || 0))
+}
+
+function formatCouponValue(coupon: MyCoupon) {
+  if (coupon.type === 2) {
+    const rate = Number(coupon.discountRate ?? 1)
+    return `${(rate * 10).toFixed(rate * 10 === Math.trunc(rate * 10) ? 0 : 1)}折`
+  }
+  return `减 ${formatPrice(coupon.discountAmount)}`
+}
+
+async function loadCartCouponHints() {
+  if (!auth.isLoggedIn || !cart.selectedCount || cart.selectedAmount <= 0) {
+    cartCoupons.value = []
+    return
+  }
+  couponLoading.value = true
+  try {
+    const res = await getCheckoutCoupons(cart.selectedAmount)
+    cartCoupons.value = res.data || []
+  } finally {
+    couponLoading.value = false
+  }
 }
 
 async function toggleItem(item: CartItem, checked: string | number | boolean) {
@@ -81,9 +164,16 @@ function goCheckout() {
 
 onMounted(() => {
   if (auth.isLoggedIn) {
-    cart.fetchCart()
+    cart.fetchCart().then(loadCartCouponHints)
   }
 })
+
+watch(
+  () => [auth.isLoggedIn, cart.selectedCount, cart.selectedAmount] as const,
+  () => {
+    loadCartCouponHints()
+  },
+)
 </script>
 
 <template>
@@ -170,6 +260,11 @@ onMounted(() => {
               <dd class="amount">{{ formatPrice(cart.selectedAmount) }}</dd>
             </div>
           </dl>
+          <div class="coupon-hint" :class="{ active: bestCoupon, pending: closestCoupon && !bestCoupon }">
+            <span>{{ bestCoupon ? 'Best Coupon' : closestCoupon ? 'Need More' : 'Coupon' }}</span>
+            <strong>{{ couponHintTitle }}</strong>
+            <p>{{ couponHintDesc }}</p>
+          </div>
           <el-button size="large" type="primary" :disabled="cart.selectedCount === 0" @click="goCheckout">
             去结算
           </el-button>
@@ -403,6 +498,50 @@ onMounted(() => {
 .summary-panel .amount {
   color: #e5484d;
   font-size: 24px;
+}
+
+.coupon-hint {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(17, 24, 39, 0.07);
+  border-radius: 14px;
+  background: #f7f8f5;
+}
+
+.coupon-hint.active {
+  border-color: rgba(47, 143, 103, 0.28);
+  background: #eef8f2;
+}
+
+.coupon-hint.pending {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: #fff7ed;
+}
+
+.coupon-hint span,
+.coupon-hint strong,
+.coupon-hint p {
+  display: block;
+}
+
+.coupon-hint span {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.coupon-hint strong {
+  margin-top: 8px;
+  color: #111827;
+  font-size: 16px;
+}
+
+.coupon-hint p {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .summary-panel :deep(.el-button) {

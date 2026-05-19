@@ -50,9 +50,94 @@ export interface PaymentRecord {
   updateTime?: string
 }
 
+export interface PaymentChannelSummary {
+  channel: number
+  channelDesc?: string
+  count: number
+  amount: number
+}
+
+export interface PaymentSummary {
+  totalCount: number
+  totalAmount: number
+  pendingCount: number
+  pendingAmount: number
+  paidCount: number
+  paidAmount: number
+  failedCount: number
+  failedAmount: number
+  refundedCount: number
+  refundedAmount: number
+  todayPaidAmount: number
+  todayRefundedAmount: number
+  successRate: number
+  refundRate: number
+  channels: PaymentChannelSummary[]
+}
+
+export interface PaymentAccessChannel {
+  channel: number
+  name: string
+  desc: string
+  enabled: boolean
+  status: string
+}
+
+export interface PaymentAccess {
+  mode: string
+  callbackRequireSignature: boolean
+  callbackPath: string
+  devSignatureAlgorithm: string
+  channels: PaymentAccessChannel[]
+}
+
+export interface PaymentCallbackQuery {
+  keyword?: string
+  channel?: number
+  signatureStatus?: number
+  processStatus?: number
+  pageNum?: number
+  pageSize?: number
+}
+
+export interface PaymentCallbackRecord {
+  id: ApiId
+  callbackNo: string
+  channel: number
+  channelDesc?: string
+  channelName?: string
+  payNo?: string
+  thirdPayNo?: string
+  notifyId?: string
+  eventType?: string
+  amount?: number
+  signatureStatus?: number
+  signatureStatusDesc?: string
+  processStatus?: number
+  processStatusDesc?: string
+  retryCount?: number
+  errorMessage?: string
+  rawData?: string
+  requestHeaders?: string
+  createTime?: string
+  updateTime?: string
+}
+
 export interface PaymentRefundPayload {
   amount?: number
   reason?: string
+}
+
+export function getPaymentSummary() {
+  return request.get<ApiResult<PaymentSummary>>('/api/admin/payment/summary')
+}
+
+export function getPaymentAccess() {
+  return request.get<ApiResult<PaymentAccess>>('/api/admin/payment/access')
+}
+
+export function getPaymentCallbackPage(params: PaymentCallbackQuery) {
+  return request.get<ApiResult<PageResult<PaymentCallbackRecord>>>('/api/admin/payment/callback/page', { params })
 }
 
 export function getPaymentPage(params: PaymentQuery) {

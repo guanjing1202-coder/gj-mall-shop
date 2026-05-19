@@ -30,6 +30,7 @@ public class OrderVO {
     private String deliveryRemark;
 
     private ReceiverVO receiver;
+    private InvoiceVO invoice;
     private String remark;
 
     private LocalDateTime createTime;

@@ -13,5 +13,7 @@ public class OrderLogisticsVO {
     private String deliveryCompany;
     private String deliveryNo;
     private String deliveryRemark;
+    private String currentAction;
+    private String nextHint;
     private List<OrderLogisticsTraceVO> traces;
 }

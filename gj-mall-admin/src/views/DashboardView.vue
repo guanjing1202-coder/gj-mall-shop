@@ -95,6 +95,47 @@ const workflowCards = computed(() => [
   },
 ])
 
+const healthMetrics = computed(() => [
+  {
+    label: '支付转化率',
+    value: formatPercent(dashboard.value.paidConversionRate),
+    desc: `已支付 ${formatNumber(paidOrderCount.value)} / 总订单 ${formatNumber(dashboard.value.orderTotal)}`,
+    tone: 'blue',
+  },
+  {
+    label: '客单价',
+    value: formatMoney(dashboard.value.averageOrderAmount),
+    desc: `累计实收 ${formatMoney(dashboard.value.paidAmountTotal)}`,
+    tone: 'green',
+  },
+  {
+    label: '退款金额',
+    value: formatMoney(dashboard.value.refundAmountTotal),
+    desc: `今日退款 ${formatMoney(dashboard.value.todayRefundAmount)}`,
+    tone: 'orange',
+  },
+  {
+    label: '退款率',
+    value: formatPercent(dashboard.value.refundRate),
+    desc: `已退款 ${formatNumber(dashboard.value.refundedCount)} / 已支付 ${formatNumber(paidOrderCount.value)}`,
+    tone: 'red',
+  },
+  {
+    label: '新增会员',
+    value: formatNumber(dashboard.value.todayNewUsers),
+    desc: `会员总数 ${formatNumber(dashboard.value.userTotal)}`,
+    tone: 'purple',
+  },
+])
+
+const paidOrderCount = computed(() => {
+  return Number(dashboard.value.pendingDeliveryCount || 0)
+    + Number(dashboard.value.pendingReceiveCount || 0)
+    + Number(dashboard.value.completedCount || 0)
+    + Number(dashboard.value.refundingCount || 0)
+    + Number(dashboard.value.refundedCount || 0)
+})
+
 const maxTrendOrders = computed(() => {
   return Math.max(...dashboard.value.orderTrend.map((item) => Number(item.orderCount || 0)), 1)
 })
@@ -140,6 +181,11 @@ function createEmptyDashboard(): DashboardBusiness {
     paidAmountTotal: 0,
     todayPaidAmount: 0,
     pendingDeliveryAmount: 0,
+    paidConversionRate: 0,
+    averageOrderAmount: 0,
+    refundAmountTotal: 0,
+    todayRefundAmount: 0,
+    refundRate: 0,
     pendingAfterSaleCount: 0,
     pendingCommentCount: 0,
     activeCouponCount: 0,
@@ -160,6 +206,10 @@ function formatMoney(value?: number) {
 
 function formatNumber(value?: number) {
   return Number(value || 0).toLocaleString('zh-CN')
+}
+
+function formatPercent(value?: number) {
+  return `${Number(value || 0).toFixed(2)}%`
 }
 
 function trendBarStyle(value?: number) {
@@ -237,6 +287,25 @@ function openTarget(target: string | { name: string; query?: Record<string, stri
             <em>{{ item.desc }}</em>
             <b>{{ item.action }}</b>
           </button>
+        </div>
+      </section>
+
+      <section class="dashboard-panel health-panel">
+        <div class="panel-header">
+          <h3>经营健康指标</h3>
+          <a-button type="link" @click="openModule('Payment')">支付退款</a-button>
+        </div>
+        <div class="health-grid">
+          <div
+            v-for="item in healthMetrics"
+            :key="item.label"
+            class="health-card"
+            :class="`health-${item.tone}`"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+            <em>{{ item.desc }}</em>
+          </div>
         </div>
       </section>
 
@@ -449,10 +518,67 @@ function openTarget(target: string | { name: string; query?: Record<string, stri
   padding-bottom: 18px;
 }
 
+.health-panel {
+  padding-bottom: 18px;
+}
+
 .workflow-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.health-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #f0f0f0;
+  border-top: 3px solid #1677ff;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.health-card span,
+.health-card em {
+  display: block;
+  overflow: hidden;
+  color: #8c8c8c;
+  font-style: normal;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-card strong {
+  display: block;
+  overflow: hidden;
+  margin: 8px 0 6px;
+  color: #1f1f1f;
+  font-size: 22px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-green {
+  border-top-color: #389e0d;
+}
+
+.health-orange {
+  border-top-color: #d48806;
+}
+
+.health-red {
+  border-top-color: #cf1322;
+}
+
+.health-purple {
+  border-top-color: #722ed1;
 }
 
 .workflow-card {
@@ -715,7 +841,8 @@ function openTarget(target: string | { name: string; query?: Record<string, stri
 
   .dashboard-grid,
   .lower-grid,
-  .workflow-grid {
+  .workflow-grid,
+  .health-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -723,7 +850,8 @@ function openTarget(target: string | { name: string; query?: Record<string, stri
 @media (max-width: 720px) {
   .metric-grid,
   .pending-grid,
-  .workflow-grid {
+  .workflow-grid,
+  .health-grid {
     grid-template-columns: 1fr;
   }
 
