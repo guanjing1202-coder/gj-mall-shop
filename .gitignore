@@ -31,5 +31,6 @@ Thumbs.db
 # Temporary files
 .codex-tmp/
 .codex-run/
+.codex-tools/
 tmp/
 temp/

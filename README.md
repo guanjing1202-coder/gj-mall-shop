@@ -1,164 +1,310 @@
-# gj-mall-shop
+# GJ Mall Shop
 
-多端电商商城：**PC Web + H5 + 微信小程序 + 管理后台**，前后端分离。
+GJ Mall Shop 是一个前后端分离的多端电商商城项目，包含 PC 商城、移动端 H5/小程序、管理后台和 Spring Boot 后端服务。项目以单体多模块后端为核心，配套 MySQL、Redis、MongoDB、RabbitMQ 完成商品、用户、购物车、订单、支付、营销、后台管理等业务能力。
 
-## 一、项目结构
+## 项目结构
 
-```
+```text
 gj-mall-shop/
-├── gj-mall-server/     # 后端：Spring Boot 2.7 + JDK 8 + Maven 多模块单体
-├── gj-mall-web/        # PC 商城：Vue 3 + Vite + TS + Element Plus      端口 5173
-├── gj-mall-uni/        # H5 + 微信小程序：uni-app Vue 3 + TS              端口 5175 (H5)
-├── gj-mall-admin/      # 管理后台：Vue 3 + Vite + TS + Ant Design Vue    端口 5174
-├── docs/               # 接口文档、ER 图、SQL
-└── README.md
+├─ gj-mall-server/      # 后端：Spring Boot 2.7 + JDK 8 + Maven 多模块
+├─ gj-mall-web/         # PC 商城：Vue 3 + Vite + TypeScript + Element Plus
+├─ gj-mall-admin/       # 管理后台：Vue 3 + Vite + TypeScript + Ant Design Vue
+├─ gj-mall-uni/         # 移动端：uni-app Vue 3，支持 H5 和微信小程序构建
+├─ docs/
+│  └─ db/               # 数据库建表、测试数据、Mongo 商品详情数据
+└─ README.md
 ```
 
-## 二、本地中间件（已安装）
+## 技术栈
 
-| 组件 | 版本 | 端口 | 安装目录 | 说明 |
-|------|------|------|----------|------|
-| MySQL | 8.0.44 | 3306 | `C:\Program Files\MySQL\MySQL Server 8.0` | 用户 `root` / 密码 `123456`；库 `gj_mall` |
-| Redis | 5.0.14 | 6379 | `D:\dev\redis` | Windows 服务名 `redis` |
-| MongoDB | 7.0.14 | 27017 | `D:\dev\mongodb` | 服务名 `MongoDB`；库 `gj_mall_doc` |
-| Erlang OTP | 26.2.5 | - | `D:\dev\erlang` | RabbitMQ 依赖 |
-| RabbitMQ | 3.13.7 | 5672 / 15672 | `D:\dev\rabbitmq` | 服务名 `RabbitMQ`；管理台 http://localhost:15672 (guest/guest) |
+| 端 | 技术 |
+| --- | --- |
+| 后端 | Spring Boot 2.7.18、Java 8、Maven、MyBatis-Plus、JWT、Knife4j、Redisson |
+| PC 商城 | Vue 3、Vite 5、TypeScript、Pinia、Vue Router、Element Plus |
+| 管理后台 | Vue 3、Vite 5、TypeScript、Pinia、Vue Router、Ant Design Vue |
+| 移动端 | uni-app Vue 3、TypeScript、Pinia |
+| 数据与中间件 | MySQL 8、Redis、MongoDB、RabbitMQ |
 
-`RABBITMQ_BASE` 已设为 `D:\dev\rabbitmq\data`，`ERLANG_HOME` 已设为 `D:\dev\erlang`（机器级环境变量）。
+## 本地环境
 
-### 服务启停
+当前本机已将项目依赖统一安装在 D 盘：
+
+```text
+D:\dev\gj-mall-deps
+├─ mysql
+├─ redis
+├─ mongodb
+├─ erlang
+├─ rabbitmq
+├─ mongosh-npm
+├─ data
+├─ logs
+└─ scripts
+```
+
+已安装组件：
+
+| 组件 | 版本 | 地址 / 端口 | 账号 |
+| --- | --- | --- | --- |
+| MySQL | 8.0.44 | `127.0.0.1:3306` | `root / 123456` |
+| Redis | 5.0.14.1 | `127.0.0.1:6379` | 无密码 |
+| MongoDB | 7.0.14 | `127.0.0.1:27017` | 无密码 |
+| RabbitMQ | 3.13.7 | `127.0.0.1:5672` | `guest / guest` |
+| RabbitMQ Management | 3.13.7 | `http://127.0.0.1:15672` | `guest / guest` |
+
+项目内还包含本地便携 JDK 和 Maven：
+
+```text
+.codex-tools/
+├─ jdk8/
+└─ apache-maven-3.9.9/
+```
+
+## 快速启动
+
+如果你在当前机器上运行，优先使用已经准备好的脚本：
 
 ```powershell
-# 启动 / 停止单个服务（管理员 PowerShell）
-Start-Service redis,MongoDB,RabbitMQ,MySQL80
-Stop-Service  RabbitMQ,MongoDB,redis  # MySQL80 通常常驻
+# 启动 MySQL、Redis、MongoDB、RabbitMQ、后端、PC 商城、管理后台、Uni H5
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-all.ps1
 
-# 状态总览
-Get-Service redis,MongoDB,RabbitMQ,MySQL80
+# 查看全部服务状态
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-all.ps1
+
+# 停止全部服务
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-all.ps1
 ```
 
-## 三、后端（gj-mall-server）
+启动成功后访问：
 
-### 模块划分（11 个子模块）
+| 服务 | 地址 |
+| --- | --- |
+| 后端健康检查 | `http://127.0.0.1:8080/api/v1/ping` |
+| 接口文档 | `http://127.0.0.1:8080/doc.html` |
+| PC 商城 | `http://127.0.0.1:5173` |
+| 管理后台 | `http://127.0.0.1:5174` |
+| Uni H5 | `http://127.0.0.1:5175` |
+| RabbitMQ 管理台 | `http://127.0.0.1:15672` |
 
+管理后台默认账号：
+
+```text
+用户名：admin
+密码：123456
 ```
+
+## 数据库初始化
+
+如果拉取了新代码，建议重新导入最新测试数据：
+
+```powershell
+$mysql = 'D:\dev\gj-mall-deps\mysql\bin\mysql.exe'
+$mongosh = 'D:\dev\gj-mall-deps\mongosh-npm\node_modules\.bin\mongosh.cmd'
+
+& $mysql -uroot -p123456 -e "DROP DATABASE IF EXISTS gj_mall; CREATE DATABASE gj_mall DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
+cmd /c "`"$mysql`" -uroot -p123456 --default-character-set=utf8mb4 gj_mall < docs\db\01-schema.sql"
+cmd /c "`"$mysql`" -uroot -p123456 --default-character-set=utf8mb4 gj_mall < docs\db\02-test-data.sql"
+& $mongosh gj_mall_doc docs\db\03-mongo-details.js --quiet
+```
+
+数据源配置位于：
+
+```text
+gj-mall-server/gj-mall-app/src/main/resources/application-dev.yml
+```
+
+默认连接信息：
+
+```text
+MySQL:   jdbc:mysql://127.0.0.1:3306/gj_mall
+Redis:   127.0.0.1:6379
+MongoDB: mongodb://127.0.0.1:27017/gj_mall_doc
+RabbitMQ: 127.0.0.1:5672
+```
+
+## 后端开发
+
+后端是 Maven 多模块项目，入口模块为 `gj-mall-app`。
+
+```text
 gj-mall-server/
-├── gj-mall-common         # 通用：Result/异常/常量/枚举
-├── gj-mall-framework      # 框架封装：JWT/Redis/MQ/Mybatis/Knife4j/CORS
-├── gj-mall-user           # 用户中心
-├── gj-mall-product        # 商品中心
-├── gj-mall-cart           # 购物车
-├── gj-mall-order          # 订单中心
-├── gj-mall-pay            # 支付（策略模式：Mock / Wechat / Alipay）
-├── gj-mall-marketing      # 优惠券 / 秒杀 / 满减
-├── gj-mall-search         # 搜索（暂用 MySQL，后期接 ES）
-├── gj-mall-admin-api      # 后台 API 聚合
-└── gj-mall-app            # Main 启动模块
+├─ gj-mall-common       # 通用返回、异常、枚举、常量
+├─ gj-mall-framework    # JWT、拦截器、配置、跨域、MyBatis、Knife4j
+├─ gj-mall-user         # 用户、登录、地址、收藏、浏览历史、消息
+├─ gj-mall-product      # 商品、分类、品牌、SKU、库存、评价、搜索
+├─ gj-mall-cart         # 购物车
+├─ gj-mall-order        # 订单、售后、物流、评价、超时消息
+├─ gj-mall-pay          # 支付策略、支付记录、回调
+├─ gj-mall-marketing    # 优惠券、秒杀
+├─ gj-mall-search       # 搜索模块预留
+├─ gj-mall-admin-api    # 后台管理 API
+└─ gj-mall-app          # Spring Boot 启动模块
 ```
 
-### 启动
+构建后端：
 
-```bash
-cd gj-mall-server
-mvn -DskipTests clean install
-cd gj-mall-app
-mvn spring-boot:run
-# 或
-java -jar target/gj-mall-app.jar
+```powershell
+cd D:\CodexWorkspace\gj-mall-shop\gj-mall-server
+
+$root = 'D:\CodexWorkspace\gj-mall-shop'
+$jdk = Get-ChildItem "$root\.codex-tools\jdk8" -Directory | Select-Object -First 1
+$env:JAVA_HOME = $jdk.FullName
+$env:Path = "$env:JAVA_HOME\bin;$root\.codex-tools\apache-maven-3.9.9\bin;$env:Path"
+
+mvn -DskipTests package
 ```
 
-启动成功后：
-- 健康检查：http://localhost:8080/api/v1/ping
-- 接口文档：http://localhost:8080/doc.html
-- Actuator：http://localhost:8080/actuator/health
+手动启动后端：
 
-### 配置文件
+```powershell
+cd D:\CodexWorkspace\gj-mall-shop\gj-mall-server\gj-mall-app
+java -jar target\gj-mall-app.jar
+```
 
-- `gj-mall-app/src/main/resources/application.yml` — 通用
-- `gj-mall-app/src/main/resources/application-dev.yml` — 本机连接串（已对接 4 个中间件）
+## 前端开发
 
-## 四、前端
+三个前端目录都已安装 `node_modules`。如需重新安装依赖，进入对应目录执行 `npm ci`。
 
-### 4.1 PC Web 商城 (gj-mall-web)
+### PC 商城
 
-```bash
-cd gj-mall-web
-npm install     # 已装
-npm run dev     # 起 http://localhost:5173
+```powershell
+cd D:\CodexWorkspace\gj-mall-shop\gj-mall-web
+npm run dev
 npm run build
 ```
 
-- 框架：Vue 3 + Vite 5 + TS + Pinia + Vue Router 4 + Element Plus
-- 自动按需引入 Element Plus
-- 已配置 `/api` 代理到 `http://127.0.0.1:8080`
+默认端口：`5173`
 
-### 4.2 管理后台 (gj-mall-admin)
+### 管理后台
 
-```bash
-cd gj-mall-admin
-npm install     # 已装
-npm run dev     # 起 http://localhost:5174
+```powershell
+cd D:\CodexWorkspace\gj-mall-shop\gj-mall-admin
+npm run dev
+npm run build
 ```
 
-- 框架：Vue 3 + Vite + TS + Ant Design Vue
-- 已带：登录页、布局、仪表盘、商品/订单/用户管理空壳页
-- 默认登录 `admin / 123456`（mock 通过，后端 RBAC 接口待实现）
+默认端口：`5174`
 
-### 4.3 移动端 H5 + 微信小程序 (gj-mall-uni)
+### Uni H5 / 微信小程序
 
-```bash
-cd gj-mall-uni
-npm install                     # 已装
-npm run dev:h5                  # H5 调试，起 http://localhost:5175
-npm run dev:mp-weixin           # 编译产物在 dist/dev/mp-weixin/，用微信开发者工具打开
+```powershell
+cd D:\CodexWorkspace\gj-mall-shop\gj-mall-uni
+npm run dev:h5
 npm run build:h5
+npm run dev:mp-weixin
 npm run build:mp-weixin
 ```
 
-- 框架：uni-app Vue 3 + TS + Pinia
-- 已建 4 个 tab 页：首页/分类/购物车/我的 + 商品详情页
-- 微信小程序 AppID 占位：`wxXXXXXXXXXXXXXXXX`（后续在 `src/manifest.json` 替换为真实值）
+H5 默认端口：`5175`
 
-## 五、关键设计
+微信小程序产物在 `dist/dev/mp-weixin` 或 `dist/build/mp-weixin`，需要使用微信开发者工具打开。
 
-### 鉴权
+## 常用命令
 
-- 用户端 / 后台端各自独立的 JWT 签发与拦截器
-- access token 7200s（2h），refresh token 7d
-- 客户端通过请求头 `X-Client-Type: pc | h5 | mp-weixin | admin` 标识来源
+```powershell
+# 拉取最新代码
+git pull --ff-only
 
-### 支付（策略模式）
+# 查看中间件状态
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-deps.ps1
 
+# 只启动中间件
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-deps.ps1
+
+# 只停止中间件
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-deps.ps1
+
+# 查看全部项目服务状态
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-all.ps1
 ```
-PayService.pay(order, channel)
-  ├─ MockPayStrategy        # 当前默认（mall.pay.mode=mock）
-  ├─ WechatPayStrategy      # 后续接入 wechatpay-java
-  └─ AlipayStrategy         # 后续接入 alipay-sdk-java
+
+## 鉴权说明
+
+项目使用 JWT 鉴权，前端请求会携带：
+
+```text
+Authorization: Bearer <accessToken>
+X-Client-Type: pc | h5 | mp-weixin | admin
 ```
 
-切换为真实支付：`application-dev.yml` 改 `mall.pay.mode: real` 并配置 AppID/MchID/证书。
+后台和用户端使用不同来源标识，后端会根据 `X-Client-Type` 区分请求来源。登录后会返回 `accessToken` 和 `refreshToken`，前端在 token 过期时可调用刷新接口重新获取。
 
-### 库存防超卖
+## 支付与订单
 
-- 下单时 Redis Lua 脚本预扣（原子）
-- 订单超时未支付 → RabbitMQ 延迟队列释放库存
+当前支付模块采用策略模式：
 
-## 六、下一步开发计划（按优先级）
+```text
+PayService
+├─ MockPayStrategy
+├─ WechatPayStrategy
+└─ AlipayStrategy
+```
 
-1. **数据库 schema**：创建用户/商品/订单/营销/系统等表，写入 `docs/db/01-schema.sql`
-2. **用户模块**：注册/登录（账密 + 手机号 + 微信 code 换 openId）、JWT 签发、地址管理
-3. **商品模块**：分类树、商品 CRUD、SPU/SKU、详情走 MongoDB
-4. **购物车 + 下单 + Mock 支付** 闭环
-5. **后台 RBAC** 与商品/订单管理实现
-6. **营销模块**：优惠券、秒杀
-7. 前端三端对接真实接口
+开发环境默认适合使用 Mock 支付。订单模块包含普通下单、秒杀下单、支付结果、售后申请、订单评价、物流查询等能力。库存和订单超时释放依赖 Redis 与 RabbitMQ。
 
-## 七、故障排查
+## 常见问题
 
-- **后端启动失败连不上 MySQL**：确认 `application-dev.yml` 密码与 MySQL 一致；用 `mysql -uroot -p` 手测
-- **RabbitMQ 服务起不来（错误 1067）**：确认 `RABBITMQ_BASE` 环境变量已设到 `D:\dev\rabbitmq\data`，且该目录 SYSTEM 用户有写权限
-- **前端 dev 启动报端口冲突**：改对应 `vite.config.ts` 里的 `server.port`
+### 端口被占用
 
----
+先查看当前状态：
 
-🚀 由 Claude 协助搭建。
+```powershell
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-all.ps1
+```
+
+如果已有旧服务运行，可以先停止再启动：
+
+```powershell
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-all.ps1
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-all.ps1
+```
+
+### 后端连接不上数据库
+
+确认中间件已启动：
+
+```powershell
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-deps.ps1
+```
+
+再确认 `application-dev.yml` 中 MySQL、Redis、MongoDB、RabbitMQ 的连接信息是否和本机一致。
+
+### 前端页面打开但接口失败
+
+确认后端健康检查能访问：
+
+```text
+http://127.0.0.1:8080/api/v1/ping
+```
+
+三个前端项目的 Vite 代理会把 `/api` 转发到 `http://127.0.0.1:8080`，所以后端没启动时页面能打开，但数据接口会失败。
+
+### 拉新代码后功能异常
+
+推荐顺序：
+
+```powershell
+git pull --ff-only
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-all.ps1
+
+# 重新导入 docs/db 下的最新 SQL 和 Mongo 数据
+# 然后重新构建后端、前端
+
+PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-all.ps1
+```
+
+## 当前验证结果
+
+当前环境已验证：
+
+```text
+Backend              127.0.0.1:8080  OK
+Web                  127.0.0.1:5173  OK
+Admin                127.0.0.1:5174  OK
+UniH5                127.0.0.1:5175  OK
+MySQL                127.0.0.1:3306  OK
+Redis                127.0.0.1:6379  OK
+MongoDB              127.0.0.1:27017 OK
+RabbitMQ             127.0.0.1:5672  OK
+RabbitMQManagement   127.0.0.1:15672 OK
+```
