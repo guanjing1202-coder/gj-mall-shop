@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
+import { uploadImage } from '@/api/file'
 import {
   createCategory,
   deleteCategory,
@@ -36,6 +37,7 @@ const actionId = ref<ApiId>()
 const modalTitle = ref('新增分类')
 const formRef = ref<FormInstance>()
 const categoryTree = ref<CategoryTreeItem[]>([])
+const iconUploading = ref(false)
 
 const categoryForm = reactive<CategoryFormState>(createEmptyCategoryForm())
 const formRules: any = {
@@ -180,6 +182,29 @@ function normalizeOptional(value: string) {
 function toCategory(record: Record<string, any>) {
   return record as CategoryTreeItem
 }
+
+function isImageUrl(value?: string) {
+  return Boolean(value && (/^https?:\/\//i.test(value) || value.startsWith('/uploads/')))
+}
+
+async function uploadIcon(options: any) {
+  iconUploading.value = true
+  try {
+    const res = await uploadImage(options.file as File, 'category-icon')
+    const url = res.data?.url
+    if (!url) {
+      throw new Error('上传结果缺少图片地址')
+    }
+    categoryForm.icon = url
+    message.success('分类图标已上传')
+    options.onSuccess?.(res.data)
+  } catch (error) {
+    message.error('分类图标上传失败')
+    options.onError?.(error)
+  } finally {
+    iconUploading.value = false
+  }
+}
 </script>
 
 <template>
@@ -204,7 +229,11 @@ function toCategory(record: Record<string, any>) {
           {{ record.level || '--' }}
         </template>
         <template v-else-if="column.key === 'icon'">
-          {{ record.icon || '--' }}
+          <div v-if="record.icon" class="icon-cell">
+            <img v-if="isImageUrl(record.icon)" :src="record.icon" alt="分类图标" />
+            <span>{{ record.icon }}</span>
+          </div>
+          <span v-else>--</span>
         </template>
         <template v-else-if="column.key === 'showStatus'">
           <a-tag :color="record.showStatus === 1 ? 'success' : 'default'">
@@ -249,7 +278,20 @@ function toCategory(record: Record<string, any>) {
         <a-input v-model:value="categoryForm.name" placeholder="请输入分类名" />
       </a-form-item>
       <a-form-item label="图标">
-        <a-input v-model:value="categoryForm.icon" placeholder="可选，填写图标名或 URL" />
+        <div class="icon-editor">
+          <img v-if="isImageUrl(categoryForm.icon)" :src="categoryForm.icon" alt="分类图标预览" />
+          <div v-else class="icon-empty">{{ categoryForm.icon || '图标' }}</div>
+          <div class="icon-editor-main">
+            <a-input v-model:value="categoryForm.icon" placeholder="可选，填写图标名或 URL" />
+            <a-upload
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              :show-upload-list="false"
+              :custom-request="uploadIcon"
+            >
+              <a-button :loading="iconUploading">上传图标</a-button>
+            </a-upload>
+          </div>
+        </div>
       </a-form-item>
       <a-form-item label="排序">
         <a-input-number v-model:value="categoryForm.sort" :min="0" style="width: 100%" />
@@ -263,3 +305,54 @@ function toCategory(record: Record<string, any>) {
     </a-form>
   </a-modal>
 </template>
+
+<style scoped>
+.icon-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.icon-cell img,
+.icon-editor img,
+.icon-empty {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.icon-cell img,
+.icon-editor img {
+  object-fit: cover;
+}
+
+.icon-cell span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-editor {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.icon-empty {
+  display: grid;
+  place-items: center;
+  background: #fafafa;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.icon-editor-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+</style>

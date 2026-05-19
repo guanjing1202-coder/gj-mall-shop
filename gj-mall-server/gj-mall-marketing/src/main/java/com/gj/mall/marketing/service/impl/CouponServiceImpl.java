@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -98,27 +99,32 @@ public class CouponServiceImpl implements CouponService {
 
     @Override
     public List<MyCouponVO> available(Long userId, BigDecimal orderAmount) {
-        // 未使用 + 未过期 + 满足门槛
+        return checkoutList(userId, orderAmount).stream()
+                .filter(item -> Boolean.TRUE.equals(item.getUsable()))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<MyCouponVO> checkoutList(Long userId, BigDecimal orderAmount) {
+        BigDecimal amount = orderAmount == null ? BigDecimal.ZERO : orderAmount.max(BigDecimal.ZERO);
         List<SmsCouponUser> list = couponUserMapper.selectList(
                 Wrappers.<SmsCouponUser>lambdaQuery()
                         .eq(SmsCouponUser::getUserId, userId)
-                        .eq(SmsCouponUser::getStatus, 0));
+                        .orderByDesc(SmsCouponUser::getStatus)
+                        .orderByDesc(SmsCouponUser::getId));
         LocalDateTime now = LocalDateTime.now();
         return list.stream()
                 .map(cu -> {
                     SmsCoupon c = couponMapper.selectById(cu.getCouponId());
-                    return new Object[]{cu, c};
+                    return toCheckoutCouponVO(cu, c, amount, now);
                 })
-                .filter(pair -> {
-                    SmsCoupon c = (SmsCoupon) pair[1];
-                    if (c == null) return false;
-                    if (now.isBefore(c.getStartTime())) return false;
-                    if (now.isAfter(c.getEndTime())) return false;
-                    if (orderAmount != null && c.getMinAmount() != null
-                            && orderAmount.compareTo(c.getMinAmount()) < 0) return false;
-                    return true;
+                .sorted((a, b) -> {
+                    int usableCompare = Boolean.compare(Boolean.TRUE.equals(b.getUsable()), Boolean.TRUE.equals(a.getUsable()));
+                    if (usableCompare != 0) return usableCompare;
+                    int discountCompare = safeMoney(b.getDiscountEstimate()).compareTo(safeMoney(a.getDiscountEstimate()));
+                    if (discountCompare != 0) return discountCompare;
+                    return safeMoney(a.getAmountGap()).compareTo(safeMoney(b.getAmountGap()));
                 })
-                .map(pair -> toMyCouponVO((SmsCouponUser) pair[0], (SmsCoupon) pair[1]))
                 .collect(Collectors.toList());
     }
 
@@ -152,8 +158,9 @@ public class CouponServiceImpl implements CouponService {
         if (cu == null) throw new BizException(ResultCode.COUPON_NOT_FOUND, "未持有该优惠券或已使用");
         SmsCoupon c = getByIdOrThrow(couponId);
         LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(c.getStartTime())) throw new BizException(ResultCode.COUPON_EXPIRED, "优惠券未到可用时间");
-        if (now.isAfter(c.getEndTime())) throw new BizException(ResultCode.COUPON_EXPIRED);
+        if (!Integer.valueOf(1).equals(c.getStatus())) throw new BizException(ResultCode.COUPON_NOT_FOUND, "优惠券未启用");
+        if (c.getStartTime() != null && now.isBefore(c.getStartTime())) throw new BizException(ResultCode.COUPON_EXPIRED, "优惠券未到可用时间");
+        if (c.getEndTime() != null && now.isAfter(c.getEndTime())) throw new BizException(ResultCode.COUPON_EXPIRED);
         if (c.getMinAmount() != null && orderAmount.compareTo(c.getMinAmount()) < 0) {
             throw new BizException(ResultCode.COUPON_NOT_MATCH,
                     "需满 " + c.getMinAmount() + " 元才可使用");
@@ -305,6 +312,48 @@ public class CouponServiceImpl implements CouponService {
             vo.setEndTime(c.getEndTime());
         }
         return vo;
+    }
+
+    private MyCouponVO toCheckoutCouponVO(SmsCouponUser cu, SmsCoupon c, BigDecimal orderAmount, LocalDateTime now) {
+        MyCouponVO vo = toMyCouponVO(cu, c);
+        vo.setUsable(false);
+        vo.setDiscountEstimate(BigDecimal.ZERO);
+        vo.setAmountGap(BigDecimal.ZERO);
+        if (c == null) {
+            vo.setUnavailableReason("优惠券不存在");
+            return vo;
+        }
+        if (!Integer.valueOf(0).equals(cu.getStatus())) {
+            vo.setUnavailableReason(couponUserStatusDesc(cu.getStatus()));
+            return vo;
+        }
+        if (!Integer.valueOf(1).equals(c.getStatus())) {
+            vo.setUnavailableReason("优惠券未启用");
+            return vo;
+        }
+        if (c.getStartTime() != null && now.isBefore(c.getStartTime())) {
+            vo.setUnavailableReason("未到可用时间");
+            return vo;
+        }
+        if (c.getEndTime() != null && now.isAfter(c.getEndTime())) {
+            vo.setUnavailableReason("优惠券已过期");
+            return vo;
+        }
+        BigDecimal minAmount = c.getMinAmount() == null ? BigDecimal.ZERO : c.getMinAmount();
+        if (orderAmount.compareTo(minAmount) < 0) {
+            BigDecimal gap = minAmount.subtract(orderAmount).setScale(2, RoundingMode.HALF_UP);
+            vo.setAmountGap(gap);
+            vo.setUnavailableReason("还差 " + gap.stripTrailingZeros().toPlainString() + " 元可用");
+            return vo;
+        }
+        vo.setUsable(true);
+        vo.setUnavailableReason(null);
+        vo.setDiscountEstimate(calcDiscount(c, orderAmount));
+        return vo;
+    }
+
+    private BigDecimal safeMoney(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 
     private String typeDesc(Integer type) {

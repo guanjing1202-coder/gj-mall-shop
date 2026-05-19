@@ -1,4 +1,5 @@
 import { getAccessToken } from '@/utils/auth'
+import { ensureSession } from '@/utils/request'
 
 // #ifdef H5
 const BASE_URL = ''
@@ -15,7 +16,11 @@ export interface UploadFileResult {
   size?: number
 }
 
-export function uploadImage(filePath: string, scene = 'common'): Promise<UploadFileResult> {
+export async function uploadImage(filePath: string, scene = 'common'): Promise<UploadFileResult> {
+  const sessionReady = await ensureSession({ showToast: true, redirect: true })
+  if (!sessionReady) {
+    throw new Error('登录已过期')
+  }
   return new Promise((resolve, reject) => {
     const token = getAccessToken()
     uni.uploadFile({

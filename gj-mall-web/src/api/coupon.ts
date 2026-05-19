@@ -12,6 +12,10 @@ export interface MyCoupon {
   minAmount?: number
   startTime?: string
   endTime?: string
+  usable?: boolean
+  unavailableReason?: string
+  discountEstimate?: number
+  amountGap?: number
   status?: number
   statusDesc?: string
   createTime?: string
@@ -46,6 +50,12 @@ export function getMyCoupons(status?: number) {
 
 export function getAvailableCoupons(orderAmount?: number) {
   return request.get<ApiResult<MyCoupon[]>>('/api/coupon/available', {
+    params: { orderAmount },
+  })
+}
+
+export function getCheckoutCoupons(orderAmount?: number) {
+  return request.get<ApiResult<MyCoupon[]>>('/api/coupon/checkout', {
     params: { orderAmount },
   })
 }

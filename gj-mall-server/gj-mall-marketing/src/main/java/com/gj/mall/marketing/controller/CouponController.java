@@ -48,4 +48,11 @@ public class CouponController {
             @RequestParam(required = false) BigDecimal orderAmount) {
         return Result.success(couponService.available(UserContext.getUserId(), orderAmount));
     }
+
+    @Operation(summary = "结算页优惠券候选（包含不可用原因）")
+    @GetMapping("/checkout")
+    public Result<List<MyCouponVO>> checkout(
+            @RequestParam(required = false) BigDecimal orderAmount) {
+        return Result.success(couponService.checkoutList(UserContext.getUserId(), orderAmount));
+    }
 }

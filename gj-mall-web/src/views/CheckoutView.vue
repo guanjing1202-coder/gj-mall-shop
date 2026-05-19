@@ -12,7 +12,7 @@ import {
   type AddressItem,
   type AddressPayload,
 } from '@/api/address'
-import { getAvailableCoupons, type MyCoupon } from '@/api/coupon'
+import { getCheckoutCoupons, type MyCoupon } from '@/api/coupon'
 import { createOrder, getOrderByNo } from '@/api/order'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
@@ -60,7 +60,7 @@ const selectedAddress = computed(() => {
   return addresses.value.find((item) => String(item.id) === String(selectedAddressId.value))
 })
 const selectedCoupon = computed(() => {
-  return coupons.value.find((item) => String(item.couponId) === String(selectedCouponId.value))
+  return coupons.value.find((item) => String(item.couponId) === String(selectedCouponId.value) && isCouponUsable(item))
 })
 const payableAmount = computed(() => {
   if (directBuyMode.value) {
@@ -70,9 +70,11 @@ const payableAmount = computed(() => {
 })
 const freightAmount = computed(() => 0)
 const couponDiscount = computed(() => {
-  return selectedCoupon.value ? calcCouponDiscount(selectedCoupon.value, payableAmount.value) : 0
+  return selectedCoupon.value ? Number(selectedCoupon.value.discountEstimate ?? calcCouponDiscount(selectedCoupon.value, payableAmount.value)) : 0
 })
 const finalAmount = computed(() => Math.max(payableAmount.value + freightAmount.value - couponDiscount.value, 0))
+const usableCouponCount = computed(() => coupons.value.filter(isCouponUsable).length)
+const unavailableCouponCount = computed(() => coupons.value.length - usableCouponCount.value)
 
 function formatPrice(value?: number) {
   return new Intl.NumberFormat('zh-CN', {
@@ -93,6 +95,18 @@ function calcCouponDiscount(coupon: MyCoupon, amount: number) {
   return Math.min(amount, Number(coupon.discountAmount || 0))
 }
 
+function isCouponUsable(coupon: MyCoupon) {
+  return coupon.usable !== false && Number(coupon.status ?? 0) === 0
+}
+
+function selectCoupon(coupon: MyCoupon) {
+  if (!isCouponUsable(coupon)) {
+    ElMessage.info(coupon.unavailableReason || '这张优惠券当前不可用')
+    return
+  }
+  selectedCouponId.value = coupon.couponId
+}
+
 function formatCouponValue(coupon: MyCoupon) {
   if (coupon.type === 2) {
     const rate = Number(coupon.discountRate ?? 1)
@@ -104,6 +118,10 @@ function formatCouponValue(coupon: MyCoupon) {
 function formatCouponLimit(coupon: MyCoupon) {
   const minAmount = Number(coupon.minAmount || 0)
   return minAmount > 0 ? `满 ${formatPrice(minAmount)} 可用` : '无门槛'
+}
+
+function formatCouponDiscount(coupon: MyCoupon) {
+  return formatPrice(coupon.discountEstimate ?? calcCouponDiscount(coupon, payableAmount.value))
 }
 
 function formatDate(value?: string) {
@@ -224,12 +242,12 @@ async function loadCoupons() {
   }
   couponLoading.value = true
   try {
-    const res = await getAvailableCoupons(payableAmount.value)
+    const res = await getCheckoutCoupons(payableAmount.value)
     coupons.value = res.data || []
-    const stillAvailable = coupons.value.some((item) => String(item.couponId) === String(selectedCouponId.value))
+    const stillAvailable = coupons.value.some((item) => String(item.couponId) === String(selectedCouponId.value) && isCouponUsable(item))
     if (!stillAvailable) {
-      const bestCoupon = [...coupons.value].sort((a, b) => {
-        return calcCouponDiscount(b, payableAmount.value) - calcCouponDiscount(a, payableAmount.value)
+      const bestCoupon = coupons.value.filter(isCouponUsable).sort((a, b) => {
+        return Number(b.discountEstimate ?? calcCouponDiscount(b, payableAmount.value)) - Number(a.discountEstimate ?? calcCouponDiscount(a, payableAmount.value))
       })[0]
       selectedCouponId.value = bestCoupon?.couponId || ''
     }
@@ -479,7 +497,7 @@ onMounted(initialize)
                 <span>Coupon</span>
                 <h2>优惠券</h2>
               </div>
-              <strong v-if="selectedCoupon">已优惠 {{ formatPrice(couponDiscount) }}</strong>
+              <strong v-if="coupons.length">{{ usableCouponCount }} 张可用 / {{ unavailableCouponCount }} 张不可用</strong>
             </div>
 
             <div v-loading="couponLoading" class="coupon-grid">
@@ -498,24 +516,28 @@ onMounted(initialize)
                 v-for="coupon in coupons"
                 :key="coupon.id"
                 class="coupon-item"
-                :class="{ active: String(selectedCouponId) === String(coupon.couponId) }"
-                @click="selectedCouponId = coupon.couponId"
+                :class="{
+                  active: String(selectedCouponId) === String(coupon.couponId) && isCouponUsable(coupon),
+                  disabled: !isCouponUsable(coupon),
+                }"
+                @click="selectCoupon(coupon)"
               >
                 <div class="coupon-top">
                   <el-radio
                     :model-value="selectedCouponId"
                     :label="coupon.couponId"
-                    @change="selectedCouponId = coupon.couponId"
+                    :disabled="!isCouponUsable(coupon)"
+                    @change="selectCoupon(coupon)"
                   >
                     {{ coupon.name }}
                   </el-radio>
-                  <em>{{ coupon.typeDesc || '优惠券' }}</em>
+                  <em>{{ isCouponUsable(coupon) ? `预计省 ${formatCouponDiscount(coupon)}` : coupon.unavailableReason || coupon.statusDesc || '不可用' }}</em>
                 </div>
                 <strong>{{ formatCouponValue(coupon) }}</strong>
                 <p>{{ formatCouponLimit(coupon) }} · 有效期至 {{ formatDate(coupon.endTime) }}</p>
               </article>
 
-              <el-empty v-if="!couponLoading && !coupons.length" description="暂无可用优惠券" />
+              <el-empty v-if="!couponLoading && !coupons.length" description="暂无优惠券" />
             </div>
           </section>
 
@@ -783,6 +805,21 @@ onMounted(initialize)
 .coupon-item {
   min-height: 132px;
   cursor: pointer;
+}
+
+.coupon-item.disabled {
+  cursor: not-allowed;
+  background: #f8fafc;
+  opacity: 0.72;
+}
+
+.coupon-item.disabled .coupon-top em {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.coupon-item.disabled strong {
+  color: #9ca3af;
 }
 
 .address-item.active,

@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
+import { uploadImage } from '@/api/file'
 import {
   createAdminUser,
   deleteAdminUser,
@@ -38,6 +39,7 @@ const passwordSaving = ref(false)
 const passwordUser = ref<AdminUserRecord>()
 const newPassword = ref('123456')
 const formRef = ref<FormInstance>()
+const avatarUploading = ref(false)
 
 const keyword = ref('')
 const status = ref<number>()
@@ -267,6 +269,25 @@ function roleText(record: AdminUserRecord) {
 function toAdminUser(record: Record<string, any>) {
   return record as AdminUserRecord
 }
+
+async function uploadAvatar(options: any) {
+  avatarUploading.value = true
+  try {
+    const res = await uploadImage(options.file as File, 'admin-avatar')
+    const url = res.data?.url
+    if (!url) {
+      throw new Error('上传结果缺少图片地址')
+    }
+    userForm.avatar = url
+    message.success('头像已上传')
+    options.onSuccess?.(res.data)
+  } catch (error) {
+    message.error('头像上传失败')
+    options.onError?.(error)
+  } finally {
+    avatarUploading.value = false
+  }
+}
 </script>
 
 <template>
@@ -393,8 +414,20 @@ function toAdminUser(record: Record<string, any>) {
           </a-form-item>
         </a-col>
         <a-col :span="12">
-          <a-form-item label="头像 URL">
-            <a-input v-model:value="userForm.avatar" placeholder="可选" />
+          <a-form-item label="头像">
+            <div class="avatar-field">
+              <a-avatar :src="userForm.avatar" :size="56">{{ userForm.nickname?.slice(0, 1) || 'U' }}</a-avatar>
+              <div class="avatar-field-main">
+                <a-input v-model:value="userForm.avatar" placeholder="可选，也可上传图片" />
+                <a-upload
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  :show-upload-list="false"
+                  :custom-request="uploadAvatar"
+                >
+                  <a-button :loading="avatarUploading">上传头像</a-button>
+                </a-upload>
+              </div>
+            </div>
           </a-form-item>
         </a-col>
         <a-col :span="12">
@@ -434,3 +467,18 @@ function toAdminUser(record: Record<string, any>) {
     </a-form>
   </a-modal>
 </template>
+
+<style scoped>
+.avatar-field {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.avatar-field-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+</style>

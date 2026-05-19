@@ -850,7 +850,7 @@ onMounted(loadOrder)
             class="image-upload-action"
             accept="image/*"
             :show-file-list="false"
-            :http-request="(options) => uploadFormImage('comment', options)"
+            :http-request="uploadCommentImage"
           >
             <el-button :loading="imageUploading === 'comment'">选择图片上传</el-button>
           </el-upload>
@@ -916,7 +916,7 @@ onMounted(loadOrder)
             class="image-upload-action"
             accept="image/*"
             :show-file-list="false"
-            :http-request="(options) => uploadFormImage('afterSale', options)"
+            :http-request="uploadAfterSaleImage"
           >
             <el-button :loading="imageUploading === 'afterSale'">选择图片上传</el-button>
           </el-upload>

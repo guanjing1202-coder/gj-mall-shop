@@ -13,6 +13,8 @@ logs/
 *.log
 .run.log
 dump.rdb
+uploads/
+**/uploads/
 
 # IDE and OS files
 .idea/
@@ -28,5 +30,6 @@ Thumbs.db
 
 # Temporary files
 .codex-tmp/
+.codex-run/
 tmp/
 temp/

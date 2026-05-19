@@ -23,6 +23,9 @@ public interface CouponService {
     /** 可用优惠券列表（适用于当前订单金额） */
     List<MyCouponVO> available(Long userId, BigDecimal orderAmount);
 
+    /** 结算页优惠券候选列表：包含可用券和不可用原因 */
+    List<MyCouponVO> checkoutList(Long userId, BigDecimal orderAmount);
+
     /** 领券中心：上架、有效、仍有余量的优惠券 */
     List<CouponCenterVO> centerList();
 

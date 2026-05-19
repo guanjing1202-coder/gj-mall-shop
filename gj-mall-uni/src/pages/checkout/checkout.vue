@@ -76,23 +76,32 @@
           <text>优惠券</text>
           <text v-if="selectedCoupon" class="discount">-{{ formatPrice(couponDiscount) }}</text>
         </view>
+        <view v-if="coupons.length" class="coupon-summary">
+          <text>{{ usableCouponCount }} 张可用</text>
+          <text>{{ unavailableCouponCount }} 张暂不可用</text>
+        </view>
         <view class="coupon-card" :class="{ active: !selectedCouponId }" @tap="selectedCouponId = ''">
           <text>不使用优惠券</text>
           <text>直接按商品金额结算</text>
         </view>
         <view v-if="couponLoading" class="empty small">优惠券加载中...</view>
-        <view v-else-if="!coupons.length" class="empty small">暂无可用优惠券</view>
+        <view v-else-if="!coupons.length" class="empty small">暂无优惠券</view>
         <view
           v-for="item in coupons"
           v-else
           :key="item.id"
           class="coupon-card"
-          :class="{ active: String(selectedCouponId) === String(item.couponId) }"
-          @tap="selectedCouponId = item.couponId || ''"
+          :class="{
+            active: String(selectedCouponId) === String(item.couponId) && isCouponUsable(item),
+            disabled: !isCouponUsable(item),
+          }"
+          @tap="selectCoupon(item)"
         >
           <view>
             <text>{{ item.name }}</text>
-            <text>{{ couponRule(item) }}</text>
+            <text>
+              {{ isCouponUsable(item) ? `${couponRule(item)} · 预计省 ${formatPrice(couponDiscountValue(item))}` : item.unavailableReason || item.statusDesc || '当前不可用' }}
+            </text>
           </view>
           <text class="coupon-value">{{ couponValue(item) }}</text>
         </view>
@@ -171,7 +180,7 @@ import {
   type AddressPayload,
 } from '@/api/address'
 import { getCart, type CartInfo, type CartItem } from '@/api/cart'
-import { getAvailableCoupons, type MyCoupon } from '@/api/coupon'
+import { getCheckoutCoupons, type MyCoupon } from '@/api/coupon'
 import { createOrder } from '@/api/order'
 import { getProductDetail, type ApiId } from '@/api/product'
 import { requireSession, syncSession } from '@/utils/session'
@@ -215,9 +224,11 @@ const addressForm = reactive<AddressPayload>({
 })
 
 const selectedItems = computed(() => cart.value.items.filter((item) => item.selected === 1 && !item.invalid))
-const selectedCoupon = computed(() => coupons.value.find((item) => String(item.couponId) === String(selectedCouponId.value)))
-const couponDiscount = computed(() => (selectedCoupon.value ? calcCouponDiscount(selectedCoupon.value, Number(cart.value.selectedAmount || 0)) : 0))
+const selectedCoupon = computed(() => coupons.value.find((item) => String(item.couponId) === String(selectedCouponId.value) && isCouponUsable(item)))
+const couponDiscount = computed(() => (selectedCoupon.value ? couponDiscountValue(selectedCoupon.value) : 0))
 const finalAmount = computed(() => Math.max(Number(cart.value.selectedAmount || 0) - couponDiscount.value, 0))
+const usableCouponCount = computed(() => coupons.value.filter(isCouponUsable).length)
+const unavailableCouponCount = computed(() => coupons.value.length - usableCouponCount.value)
 
 onLoad((options: any) => {
   if (options?.skuId) {
@@ -327,11 +338,11 @@ async function loadAddresses() {
 async function loadCoupons() {
   couponLoading.value = true
   try {
-    const res = await getAvailableCoupons(Number(cart.value.selectedAmount || 0))
+    const res = await getCheckoutCoupons(Number(cart.value.selectedAmount || 0))
     coupons.value = res.data || []
-    const available = coupons.value.some((item) => String(item.couponId) === String(selectedCouponId.value))
+    const available = coupons.value.some((item) => String(item.couponId) === String(selectedCouponId.value) && isCouponUsable(item))
     if (!available) {
-      const best = [...coupons.value].sort((a, b) => calcCouponDiscount(b, Number(cart.value.selectedAmount || 0)) - calcCouponDiscount(a, Number(cart.value.selectedAmount || 0)))[0]
+      const best = coupons.value.filter(isCouponUsable).sort((a, b) => couponDiscountValue(b) - couponDiscountValue(a))[0]
       selectedCouponId.value = best?.couponId || ''
     }
   } finally {
@@ -448,6 +459,22 @@ function couponValue(item: MyCoupon) {
 function couponRule(item: MyCoupon) {
   const minAmount = Number(item.minAmount || 0)
   return minAmount > 0 ? `满 ${minAmount.toFixed(0)} 元可用` : '无门槛可用'
+}
+
+function isCouponUsable(item: MyCoupon) {
+  return item.usable !== false && Number(item.status ?? 0) === 0
+}
+
+function couponDiscountValue(item: MyCoupon) {
+  return Number(item.discountEstimate ?? calcCouponDiscount(item, Number(cart.value.selectedAmount || 0)))
+}
+
+function selectCoupon(item: MyCoupon) {
+  if (!isCouponUsable(item)) {
+    uni.showToast({ title: item.unavailableReason || '这张券当前不可用', icon: 'none' })
+    return
+  }
+  selectedCouponId.value = item.couponId || ''
 }
 
 function calcCouponDiscount(coupon: MyCoupon, amount: number) {
@@ -758,6 +785,24 @@ function normalizeImage(url?: string, seed = 'checkout') {
 .coupon-card.active {
   border-color: #e5484d;
   background: #fff7f7;
+}
+
+.coupon-card.disabled {
+  background: #f8fafc;
+  opacity: 0.72;
+}
+
+.coupon-card.disabled .coupon-value {
+  color: #9ca3af;
+}
+
+.coupon-summary {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6rpx;
+  color: #6b7280;
+  font-size: 23rpx;
+  font-weight: 800;
 }
 
 .coupon-card text {

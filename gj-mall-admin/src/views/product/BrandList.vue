@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
+import { uploadImage } from '@/api/file'
 import {
   createBrand,
   deleteBrand,
@@ -27,6 +28,7 @@ const modalOpen = ref(false)
 const modalMode = ref<'create' | 'edit'>('create')
 const actionId = ref<ApiId>()
 const formRef = ref<FormInstance>()
+const logoUploading = ref(false)
 
 const keyword = ref('')
 const brandList = ref<BrandItem[]>([])
@@ -180,6 +182,25 @@ function normalizeOptional(value: string) {
 function toBrand(record: Record<string, any>) {
   return record as BrandItem
 }
+
+async function uploadLogo(options: any) {
+  logoUploading.value = true
+  try {
+    const res = await uploadImage(options.file as File, 'brand-logo')
+    const url = res.data?.url
+    if (!url) {
+      throw new Error('上传结果缺少图片地址')
+    }
+    brandForm.logo = url
+    message.success('Logo 已上传')
+    options.onSuccess?.(res.data)
+  } catch (error) {
+    message.error('Logo 上传失败')
+    options.onError?.(error)
+  } finally {
+    logoUploading.value = false
+  }
+}
 </script>
 
 <template>
@@ -217,7 +238,11 @@ function toBrand(record: Record<string, any>) {
           <div style="font-weight: 600">{{ record.name }}</div>
         </template>
         <template v-else-if="column.key === 'logo'">
-          <a :href="record.logo" target="_blank">{{ record.logo || '--' }}</a>
+          <div v-if="record.logo" class="logo-cell">
+            <img :src="record.logo" alt="品牌 Logo" />
+            <a :href="record.logo" target="_blank">查看</a>
+          </div>
+          <span v-else>--</span>
         </template>
         <template v-else-if="column.key === 'description'">
           {{ record.description || '--' }}
@@ -255,8 +280,21 @@ function toBrand(record: Record<string, any>) {
       <a-form-item label="品牌名" name="name">
         <a-input v-model:value="brandForm.name" placeholder="请输入品牌名" />
       </a-form-item>
-      <a-form-item label="Logo URL">
-        <a-input v-model:value="brandForm.logo" placeholder="https://example.com/logo.png" />
+      <a-form-item label="Logo">
+        <div class="logo-editor">
+          <img v-if="brandForm.logo" :src="brandForm.logo" alt="品牌 Logo 预览" />
+          <div v-else class="logo-empty">Logo</div>
+          <div class="logo-editor-main">
+            <a-input v-model:value="brandForm.logo" placeholder="https://example.com/logo.png" />
+            <a-upload
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              :show-upload-list="false"
+              :custom-request="uploadLogo"
+            >
+              <a-button :loading="logoUploading">上传 Logo</a-button>
+            </a-upload>
+          </div>
+        </div>
       </a-form-item>
       <a-form-item label="品牌描述">
         <a-textarea v-model:value="brandForm.description" :rows="4" placeholder="请输入品牌描述" />
@@ -273,3 +311,46 @@ function toBrand(record: Record<string, any>) {
     </a-form>
   </a-modal>
 </template>
+
+<style scoped>
+.logo-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-cell img,
+.logo-editor img,
+.logo-empty {
+  width: 56px;
+  height: 56px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.logo-cell img,
+.logo-editor img {
+  object-fit: cover;
+}
+
+.logo-editor {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.logo-empty {
+  display: grid;
+  place-items: center;
+  background: #fafafa;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.logo-editor-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+</style>

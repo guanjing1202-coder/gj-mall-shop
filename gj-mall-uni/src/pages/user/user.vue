@@ -1,12 +1,15 @@
 <template>
   <view class="page">
     <view class="profile-card">
-      <image class="avatar" :src="profile?.avatar || fallbackAvatar" mode="aspectFill" />
+      <image class="avatar" :src="displayAvatar" mode="aspectFill" @tap="isLoggedIn && chooseAvatar()" />
       <view class="profile-copy">
         <text class="name">{{ displayName }}</text>
         <text class="meta">{{ isLoggedIn ? profile?.phone || profile?.email || '欢迎回来' : '登录后解锁订单、购物车和优惠券' }}</text>
       </view>
-      <button v-if="isLoggedIn" @tap="signOut">退出</button>
+      <view v-if="isLoggedIn" class="profile-actions">
+        <button :disabled="avatarUploading" @tap="chooseAvatar">{{ avatarUploading ? '上传中' : '换头像' }}</button>
+        <button @tap="signOut">退出</button>
+      </view>
     </view>
 
     <view v-if="!isLoggedIn" class="login-panel">
@@ -44,6 +47,7 @@
         <input v-model="profileForm.nickname" class="field" placeholder="昵称" />
         <input v-model="profileForm.phone" class="field" placeholder="手机号" />
         <input v-model="profileForm.email" class="field" placeholder="邮箱" />
+        <input v-model="profileForm.avatar" class="field" placeholder="头像 URL，可上传后自动填入" />
       </view>
     </view>
   </view>
@@ -56,6 +60,7 @@ import { getProfile, login, logout, updateProfile, type UserProfile } from '@/ap
 import { getAddressList } from '@/api/address'
 import { getCart } from '@/api/cart'
 import { getMyCoupons } from '@/api/coupon'
+import { uploadImage } from '@/api/file'
 import { getFavoritePage } from '@/api/favorite'
 import { getHistoryPage } from '@/api/history'
 import { getAfterSalePage, getOrderPage } from '@/api/order'
@@ -73,6 +78,7 @@ const fallbackAvatar = 'https://picsum.photos/seed/gj-user/180/180'
 const account = ref('test')
 const password = ref('123456')
 const submitting = ref(false)
+const avatarUploading = ref(false)
 const isLoggedIn = ref(false)
 const profile = ref<UserProfile>()
 
@@ -90,12 +96,15 @@ const profileForm = reactive({
   nickname: '',
   phone: '',
   email: '',
+  avatar: '',
 })
 
 const displayName = computed(() => {
   if (!isLoggedIn.value) return '游客'
   return profile.value?.nickname || profile.value?.username || '会员'
 })
+
+const displayAvatar = computed(() => profileForm.avatar || profile.value?.avatar || fallbackAvatar)
 
 const stats = computed(() => [
   { label: '订单', value: statValues.orders, path: '/pages/orders/list' },
@@ -187,9 +196,35 @@ async function saveProfile() {
     nickname: profileForm.nickname.trim(),
     phone: profileForm.phone.trim(),
     email: profileForm.email.trim(),
+    avatar: profileForm.avatar.trim(),
   })
   uni.showToast({ title: '已保存', icon: 'success' })
   await loadProfile()
+}
+
+async function chooseAvatar() {
+  if (!isLoggedIn.value || avatarUploading.value) return
+  try {
+    const files = await chooseImageFiles()
+    const filePath = files[0]
+    if (!filePath) return
+    avatarUploading.value = true
+    const uploaded = await uploadImage(filePath, 'avatar')
+    profileForm.avatar = uploaded.url
+    await updateProfile({
+      nickname: profileForm.nickname.trim(),
+      phone: profileForm.phone.trim(),
+      email: profileForm.email.trim(),
+      avatar: uploaded.url,
+    })
+    await loadProfile()
+    uni.showToast({ title: '头像已更新', icon: 'success' })
+  } catch (error) {
+    if ((error as any)?.errMsg?.includes('cancel')) return
+    uni.showToast({ title: '头像上传失败', icon: 'none' })
+  } finally {
+    avatarUploading.value = false
+  }
 }
 
 async function signOut() {
@@ -214,6 +249,19 @@ function fillProfileForm(user?: UserProfile) {
   profileForm.nickname = user?.nickname || ''
   profileForm.phone = user?.phone || ''
   profileForm.email = user?.email || ''
+  profileForm.avatar = user?.avatar || ''
+}
+
+function chooseImageFiles(): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    uni.chooseImage({
+      count: 1,
+      sizeType: ['compressed'],
+      sourceType: ['album', 'camera'],
+      success: (res) => resolve(res.tempFilePaths || []),
+      fail: reject,
+    })
+  })
 }
 
 function openShortcut(path: string) {
@@ -294,6 +342,16 @@ function openShortcut(path: string) {
   color: #111827;
   font-size: 24rpx;
   font-weight: 900;
+}
+
+.profile-actions {
+  display: grid;
+  gap: 10rpx;
+}
+
+.profile-actions button {
+  min-width: 120rpx;
+  padding: 0 20rpx;
 }
 
 .login-panel,

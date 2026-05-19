@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
+import { uploadImage } from '@/api/file'
 import {
   createProduct,
   deleteProduct,
@@ -67,6 +68,7 @@ const brandList = ref<BrandItem[]>([])
 const categoryTree = ref<CategoryTreeItem[]>([])
 const detail = ref<ProductDetail>()
 const formRef = ref<FormInstance>()
+const uploadingTarget = ref('')
 
 const pagination = reactive({
   current: 1,
@@ -416,6 +418,20 @@ function splitLines(value: string) {
     .filter(Boolean)
 }
 
+function appendImageLine(field: 'imagesText' | 'detailImagesText', url: string) {
+  const list = splitLines(productForm[field])
+  if (!list.includes(url)) {
+    list.push(url)
+    productForm[field] = list.join('\n')
+  }
+}
+
+function removeImageLine(field: 'imagesText' | 'detailImagesText', url: string) {
+  productForm[field] = splitLines(productForm[field])
+    .filter((item) => item !== url)
+    .join('\n')
+}
+
 function joinLines(value?: string[]) {
   return value?.join('\n') || ''
 }
@@ -468,6 +484,48 @@ function formatSpecs(specs?: Record<string, string>) {
 
 function toProduct(record: Record<string, any>) {
   return record as ProductItem
+}
+
+const galleryImages = computed(() => splitLines(productForm.imagesText))
+const detailImages = computed(() => splitLines(productForm.detailImagesText))
+
+async function uploadToForm(options: any, target: string, scene: string, onUrl: (url: string) => void) {
+  uploadingTarget.value = target
+  try {
+    const res = await uploadImage(options.file as File, scene)
+    const url = res.data?.url
+    if (!url) {
+      throw new Error('上传结果缺少图片地址')
+    }
+    onUrl(url)
+    message.success('图片已上传')
+    options.onSuccess?.(res.data)
+  } catch (error) {
+    message.error('图片上传失败')
+    options.onError?.(error)
+  } finally {
+    uploadingTarget.value = ''
+  }
+}
+
+function uploadMainImage(options: any) {
+  return uploadToForm(options, 'main', 'product-main', (url) => {
+    productForm.mainImage = url
+  })
+}
+
+function uploadGalleryImage(options: any) {
+  return uploadToForm(options, 'gallery', 'product-gallery', (url) => appendImageLine('imagesText', url))
+}
+
+function uploadDetailImage(options: any) {
+  return uploadToForm(options, 'detail', 'product-detail', (url) => appendImageLine('detailImagesText', url))
+}
+
+function uploadSkuImage(sku: ProductFormSku, options: any) {
+  return uploadToForm(options, `sku:${sku.uid}`, 'product-sku', (url) => {
+    sku.image = url
+  })
 }
 </script>
 
@@ -733,8 +791,23 @@ function toProduct(record: Record<string, any>) {
             </a-form-item>
           </a-col>
           <a-col :span="12">
-            <a-form-item label="主图 URL">
-              <a-input v-model:value="productForm.mainImage" placeholder="https://example.com/main.jpg" />
+            <a-form-item label="主图">
+              <div class="image-input-block">
+                <div class="single-image-row">
+                  <img v-if="productForm.mainImage" :src="productForm.mainImage" alt="主图预览" class="image-preview" />
+                  <div v-else class="image-empty">主图</div>
+                  <div class="image-input-main">
+                    <a-input v-model:value="productForm.mainImage" placeholder="https://example.com/main.jpg" />
+                    <a-upload
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      :show-upload-list="false"
+                      :custom-request="uploadMainImage"
+                    >
+                      <a-button :loading="uploadingTarget === 'main'">上传主图</a-button>
+                    </a-upload>
+                  </div>
+                </div>
+              </div>
             </a-form-item>
           </a-col>
           <a-col :span="12">
@@ -746,21 +819,53 @@ function toProduct(record: Record<string, any>) {
             </a-form-item>
           </a-col>
           <a-col :span="24">
-            <a-form-item label="商品图册 URL">
+            <a-form-item label="商品图册">
+              <div class="multi-image-toolbar">
+                <span>每行一个图片 URL，也可以直接上传追加</span>
+                <a-upload
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  :show-upload-list="false"
+                  :custom-request="uploadGalleryImage"
+                >
+                  <a-button :loading="uploadingTarget === 'gallery'">上传图册图片</a-button>
+                </a-upload>
+              </div>
               <a-textarea
                 v-model:value="productForm.imagesText"
                 :rows="4"
                 placeholder="每行一个图片 URL"
               />
+              <div v-if="galleryImages.length" class="image-chip-grid">
+                <div v-for="image in galleryImages" :key="image" class="image-chip">
+                  <img :src="image" alt="商品图册预览" />
+                  <button type="button" @click="removeImageLine('imagesText', image)">移除</button>
+                </div>
+              </div>
             </a-form-item>
           </a-col>
           <a-col :span="24">
-            <a-form-item label="详情图片 URL">
+            <a-form-item label="详情图片">
+              <div class="multi-image-toolbar">
+                <span>详情页图片会按顺序展示</span>
+                <a-upload
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  :show-upload-list="false"
+                  :custom-request="uploadDetailImage"
+                >
+                  <a-button :loading="uploadingTarget === 'detail'">上传详情图片</a-button>
+                </a-upload>
+              </div>
               <a-textarea
                 v-model:value="productForm.detailImagesText"
                 :rows="4"
                 placeholder="每行一个详情图片 URL"
               />
+              <div v-if="detailImages.length" class="image-chip-grid">
+                <div v-for="image in detailImages" :key="image" class="image-chip">
+                  <img :src="image" alt="详情图片预览" />
+                  <button type="button" @click="removeImageLine('detailImagesText', image)">移除</button>
+                </div>
+              </div>
             </a-form-item>
           </a-col>
           <a-col :span="24">
@@ -841,8 +946,21 @@ function toProduct(record: Record<string, any>) {
               </a-form-item>
             </a-col>
             <a-col :span="12">
-              <a-form-item label="SKU 图片 URL">
-                <a-input v-model:value="sku.image" placeholder="可选" />
+              <a-form-item label="SKU 图片">
+                <div class="single-image-row single-image-row--compact">
+                  <img v-if="sku.image" :src="sku.image" alt="SKU 图片预览" class="image-preview" />
+                  <div v-else class="image-empty">SKU</div>
+                  <div class="image-input-main">
+                    <a-input v-model:value="sku.image" placeholder="可选" />
+                    <a-upload
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      :show-upload-list="false"
+                      :custom-request="(options: any) => uploadSkuImage(sku, options)"
+                    >
+                      <a-button :loading="uploadingTarget === `sku:${sku.uid}`">上传 SKU 图</a-button>
+                    </a-upload>
+                  </div>
+                </div>
               </a-form-item>
             </a-col>
             <a-col :span="24">
@@ -867,3 +985,96 @@ function toProduct(record: Record<string, any>) {
     </template>
   </a-drawer>
 </template>
+
+<style scoped>
+.image-input-block {
+  width: 100%;
+}
+
+.single-image-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.single-image-row--compact {
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.image-preview,
+.image-empty {
+  width: 92px;
+  height: 92px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.single-image-row--compact .image-preview,
+.single-image-row--compact .image-empty {
+  width: 72px;
+  height: 72px;
+}
+
+.image-preview {
+  object-fit: cover;
+}
+
+.image-empty {
+  display: grid;
+  place-items: center;
+  background: #fafafa;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.image-input-main {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.multi-image-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #8c8c8c;
+}
+
+.image-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.image-chip {
+  position: relative;
+  overflow: hidden;
+  width: 84px;
+  height: 84px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.image-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.image-chip button {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.68);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+</style>

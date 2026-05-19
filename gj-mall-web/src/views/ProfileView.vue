@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { UploadRequestOptions } from 'element-plus'
 import { useRouter } from 'vue-router'
 import ShopHeader from '@/components/ShopHeader.vue'
 import { getAddressList } from '@/api/address'
 import { getMyCoupons } from '@/api/coupon'
 import { getFavoritePage } from '@/api/favorite'
 import { getHistoryPage } from '@/api/history'
+import { uploadImage } from '@/api/file'
 import { getOrderPage } from '@/api/order'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
@@ -17,6 +19,7 @@ const cart = useCartStore()
 
 const loading = ref(false)
 const saving = ref(false)
+const avatarUploading = ref(false)
 const orderTotal = ref(0)
 const addressTotal = ref(0)
 const couponTotal = ref(0)
@@ -33,6 +36,7 @@ const profileForm = reactive({
 
 const displayName = computed(() => auth.user?.nickname || auth.user?.username || '会员')
 const initials = computed(() => displayName.value.slice(0, 1).toUpperCase())
+const previewAvatar = computed(() => profileForm.avatar || auth.user?.avatar || '')
 
 const quickActions = computed(() => [
   { label: '我的订单', value: orderTotal.value, path: '/orders' },
@@ -100,6 +104,22 @@ async function saveProfile() {
     ElMessage.success('个人资料已保存')
   } finally {
     saving.value = false
+  }
+}
+
+async function uploadAvatar(options: UploadRequestOptions) {
+  avatarUploading.value = true
+  try {
+    const res = await uploadImage(options.file as File, 'avatar')
+    if (res.data?.url) {
+      profileForm.avatar = res.data.url
+    }
+    ElMessage.success('头像已上传，保存资料后生效')
+    options.onSuccess(res.data)
+  } catch (error) {
+    options.onError(error as any)
+  } finally {
+    avatarUploading.value = false
   }
 }
 
@@ -190,8 +210,23 @@ onMounted(() => {
                 </el-form-item>
               </el-col>
             </el-row>
-            <el-form-item label="头像 URL">
-              <el-input v-model="profileForm.avatar" placeholder="https://..." />
+            <el-form-item label="头像">
+              <div class="avatar-editor">
+                <div class="avatar-preview">
+                  <img v-if="previewAvatar" :src="previewAvatar" :alt="displayName" />
+                  <span v-else>{{ initials }}</span>
+                </div>
+                <div class="avatar-editor-main">
+                  <el-upload
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    :show-file-list="false"
+                    :http-request="uploadAvatar"
+                  >
+                    <el-button :loading="avatarUploading">选择图片上传</el-button>
+                  </el-upload>
+                  <el-input v-model="profileForm.avatar" placeholder="也可以粘贴头像 URL" />
+                </div>
+              </div>
             </el-form-item>
           </el-form>
         </section>
@@ -409,6 +444,39 @@ onMounted(() => {
 
 .profile-form :deep(.el-segmented) {
   border-radius: 999px;
+}
+
+.avatar-editor {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 14px;
+  width: 100%;
+  align-items: center;
+}
+
+.avatar-preview {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #111827, #2f8f67);
+  color: #fff;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-editor-main {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
 }
 
 .shortcut-list {

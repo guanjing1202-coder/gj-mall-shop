@@ -17,6 +17,10 @@ export interface CouponCenterItem {
 
 export interface MyCoupon extends CouponCenterItem {
   couponId?: ApiId
+  usable?: boolean
+  unavailableReason?: string
+  discountEstimate?: number
+  amountGap?: number
   status?: number
   statusDesc?: string
   createTime?: string
@@ -33,6 +37,11 @@ export function getMyCoupons() {
 export function getAvailableCoupons(orderAmount?: number) {
   const query = typeof orderAmount === 'number' ? `?orderAmount=${encodeURIComponent(String(orderAmount))}` : ''
   return request<MyCoupon[]>({ url: `/api/coupon/available${query}`, method: 'GET' })
+}
+
+export function getCheckoutCoupons(orderAmount?: number) {
+  const query = typeof orderAmount === 'number' ? `?orderAmount=${encodeURIComponent(String(orderAmount))}` : ''
+  return request<MyCoupon[]>({ url: `/api/coupon/checkout${query}`, method: 'GET' })
 }
 
 export function receiveCoupon(couponId: ApiId) {
