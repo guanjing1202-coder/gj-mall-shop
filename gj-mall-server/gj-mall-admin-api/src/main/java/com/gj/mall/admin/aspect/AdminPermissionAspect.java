@@ -156,6 +156,7 @@ public class AdminPermissionAspect {
         rules.add(rule("/api/admin/sys/role/**", "sys.role.manage"));
         rules.add(rule("/api/admin/sys/permission/**", "sys.role.manage"));
         rules.add(rule("/api/admin/sys/config/**", "sys.config.manage"));
+        rules.add(rule("/api/admin/upload-storage/**", "sys.config.manage"));
         rules.add(rule("/api/admin/sys/user/**", "sys.user.manage"));
         rules.add(rule("/api/admin/operation-log/**", "sys.operation.log.manage"));
         return rules;

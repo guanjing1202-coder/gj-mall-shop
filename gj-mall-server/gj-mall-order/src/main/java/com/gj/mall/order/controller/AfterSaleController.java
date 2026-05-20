@@ -7,6 +7,7 @@ import com.gj.mall.order.dto.AfterSaleApplyDTO;
 import com.gj.mall.order.dto.AfterSaleReturnDTO;
 import com.gj.mall.order.dto.OrderQueryDTO;
 import com.gj.mall.order.service.AfterSaleService;
+import com.gj.mall.order.vo.AfterSaleEligibilityVO;
 import com.gj.mall.order.vo.AfterSaleVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -28,6 +29,13 @@ public class AfterSaleController {
     @PostMapping("/order/{orderId}/after-sale")
     public Result<AfterSaleVO> apply(@PathVariable Long orderId, @Valid @RequestBody AfterSaleApplyDTO dto) {
         return Result.success(afterSaleService.apply(UserContext.getUserId(), orderId, dto));
+    }
+
+    @Operation(summary = "订单售后申请资格")
+    @GetMapping("/order/{orderId}/after-sale/eligibility")
+    public Result<AfterSaleEligibilityVO> eligibility(@PathVariable Long orderId,
+                                                      @RequestParam(required = false) Integer type) {
+        return Result.success(afterSaleService.eligibility(UserContext.getUserId(), orderId, type));
     }
 
     @Operation(summary = "订单售后列表")

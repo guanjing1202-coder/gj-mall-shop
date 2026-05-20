@@ -13,6 +13,7 @@ import com.gj.mall.admin.dto.AdminAfterSaleQueryDTO;
 import com.gj.mall.admin.service.AdminAfterSaleService;
 import com.gj.mall.admin.vo.AdminAfterSaleSummaryVO;
 import com.gj.mall.admin.vo.AdminAfterSaleVO;
+import com.gj.mall.admin.vo.AdminRefundRecordVO;
 import com.gj.mall.common.enums.ResultCode;
 import com.gj.mall.common.exception.BizException;
 import com.gj.mall.common.result.PageResult;
@@ -20,11 +21,14 @@ import com.gj.mall.order.entity.OmsAfterSale;
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.entity.OmsOrderItem;
 import com.gj.mall.order.entity.PayPaymentRecord;
+import com.gj.mall.order.entity.PayRefundRecord;
 import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.order.mapper.OmsAfterSaleMapper;
 import com.gj.mall.order.mapper.OmsOrderItemMapper;
 import com.gj.mall.order.mapper.OmsOrderMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
+import com.gj.mall.order.mapper.PayRefundRecordMapper;
+import com.gj.mall.order.service.AfterSaleRuleService;
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import com.gj.mall.user.service.UserMessageService;
@@ -58,8 +62,10 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
     private final OmsOrderMapper orderMapper;
     private final OmsOrderItemMapper orderItemMapper;
     private final PayPaymentRecordMapper paymentRecordMapper;
+    private final PayRefundRecordMapper refundRecordMapper;
     private final UmsUserMapper userMapper;
     private final UserMessageService messageService;
+    private final AfterSaleRuleService ruleService;
 
     @Override
     public AdminAfterSaleSummaryVO summary() {
@@ -133,7 +139,7 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
     public Long create(AdminAfterSaleCreateDTO dto) {
         validateCreateDTO(dto);
         OmsOrder order = getOrderOrThrow(dto.getOrderId());
-        validateOrderCanAfterSale(order);
+        ruleService.validateApply(order, dto.getType());
         Long activeCount = afterSaleMapper.selectCount(Wrappers.<OmsAfterSale>lambdaQuery()
                 .eq(OmsAfterSale::getOrderId, order.getId())
                 .in(OmsAfterSale::getStatus, Arrays.asList(STATUS_PENDING, STATUS_WAIT_RETURN, STATUS_WAIT_REFUND)));
@@ -214,8 +220,12 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         OmsAfterSale update = new OmsAfterSale();
         update.setId(id);
         update.setStatus(STATUS_WAIT_REFUND);
-        update.setReturnCompany(dto == null ? null : dto.getReturnCompany());
-        update.setReturnNo(dto == null ? null : dto.getReturnNo());
+        update.setReturnCompany(dto == null || StrUtil.isBlank(dto.getReturnCompany())
+                ? afterSale.getReturnCompany()
+                : StrUtil.sub(StrUtil.trim(dto.getReturnCompany()), 0, 64));
+        update.setReturnNo(dto == null || StrUtil.isBlank(dto.getReturnNo())
+                ? afterSale.getReturnNo()
+                : StrUtil.sub(StrUtil.trim(dto.getReturnNo()), 0, 64));
         update.setReceiveTime(LocalDateTime.now());
         afterSaleMapper.updateById(update);
         notifyUser(afterSale.getUserId(), "after_sale", "退货已确认收货", "售后单 " + afterSale.getAfterSaleNo() + " 的退货已确认收货，等待退款。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
@@ -227,6 +237,12 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         OmsAfterSale afterSale = getByIdOrThrow(id);
         if (!Integer.valueOf(STATUS_WAIT_REFUND).equals(afterSale.getStatus())) {
             throw new BizException(ResultCode.OPERATION_FORBIDDEN, "仅待退款售后单可退款");
+        }
+        PayRefundRecord existingRefund = refundRecordMapper.selectOne(Wrappers.<PayRefundRecord>lambdaQuery()
+                .eq(PayRefundRecord::getAfterSaleId, afterSale.getId())
+                .last("LIMIT 1"));
+        if (existingRefund != null) {
+            throw new BizException(ResultCode.DATA_EXISTS, "退款记录已存在，请勿重复退款");
         }
         OmsOrder order = getOrderOrThrow(afterSale.getOrderId());
         PayPaymentRecord record = paymentRecordMapper.selectOne(Wrappers.<PayPaymentRecord>lambdaQuery()
@@ -241,6 +257,29 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
                 || afterSale.getAmount().compareTo(record.getAmount()) != 0) {
             throw new BizException(ResultCode.OPERATION_FORBIDDEN, "当前版本仅支持全额退款");
         }
+        String remark = dto == null ? null : StrUtil.trim(dto.getAuditRemark());
+        LocalDateTime now = LocalDateTime.now();
+
+        PayRefundRecord refundRecord = new PayRefundRecord();
+        refundRecord.setRefundNo(genRefundNo(afterSale.getUserId()));
+        refundRecord.setPaymentId(record.getId());
+        refundRecord.setPayNo(record.getPayNo());
+        refundRecord.setThirdPayNo(record.getThirdPayNo());
+        refundRecord.setAfterSaleId(afterSale.getId());
+        refundRecord.setAfterSaleNo(afterSale.getAfterSaleNo());
+        refundRecord.setOrderId(order.getId());
+        refundRecord.setOrderNo(order.getOrderNo());
+        refundRecord.setUserId(afterSale.getUserId());
+        refundRecord.setChannel(record.getChannel());
+        refundRecord.setAmount(afterSale.getAmount());
+        refundRecord.setStatus(1);
+        refundRecord.setReason(StrUtil.blankToDefault(remark, "售后退款"));
+        refundRecord.setOperatorType("admin_after_sale");
+        refundRecord.setCallbackData("after-sale-refund afterSaleNo=" + afterSale.getAfterSaleNo()
+                + " paymentId=" + record.getId()
+                + " amount=" + afterSale.getAmount());
+        refundRecord.setSuccessTime(now);
+        refundRecordMapper.insert(refundRecord);
 
         PayPaymentRecord paymentUpdate = new PayPaymentRecord();
         paymentUpdate.setId(record.getId());
@@ -248,15 +287,16 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         paymentUpdate.setCallbackData(appendCallback(record.getCallbackData(),
                 "after-sale-refund afterSaleNo=" + afterSale.getAfterSaleNo()
                         + " amount=" + afterSale.getAmount()
-                        + " remark=" + (dto == null ? "-" : StrUtil.blankToDefault(dto.getAuditRemark(), "-"))));
+                        + " refundNo=" + refundRecord.getRefundNo()
+                        + " remark=" + StrUtil.blankToDefault(remark, "-")));
         paymentRecordMapper.updateById(paymentUpdate);
 
         OmsAfterSale update = new OmsAfterSale();
         update.setId(id);
         update.setStatus(STATUS_COMPLETED);
-        update.setRefundPaymentId(record.getId());
-        update.setAuditRemark(dto == null ? afterSale.getAuditRemark() : dto.getAuditRemark());
-        update.setRefundTime(LocalDateTime.now());
+        update.setRefundPaymentId(refundRecord.getId());
+        update.setAuditRemark(remark == null ? afterSale.getAuditRemark() : remark);
+        update.setRefundTime(now);
         afterSaleMapper.updateById(update);
         updateOrderStatus(order.getId(), OrderStatus.REFUNDED.getCode());
         notifyUser(afterSale.getUserId(), "after_sale", "退款已完成", "售后单 " + afterSale.getAfterSaleNo() + " 已完成退款，退款金额 ¥" + afterSale.getAmount() + "。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
@@ -415,15 +455,6 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         }
     }
 
-    private void validateOrderCanAfterSale(OmsOrder order) {
-        if (OrderStatus.PENDING_PAY.getCode().equals(order.getStatus())
-                || OrderStatus.CANCELED.getCode().equals(order.getStatus())
-                || OrderStatus.REFUNDING.getCode().equals(order.getStatus())
-                || OrderStatus.REFUNDED.getCode().equals(order.getStatus())) {
-            throw new BizException(ResultCode.ORDER_STATUS_ERROR, "当前订单状态不可发起售后");
-        }
-    }
-
     private void updateOrderStatus(Long orderId, Integer status) {
         OmsOrder update = new OmsOrder();
         update.setId(orderId);
@@ -458,14 +489,32 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
                 : userMapper.selectList(Wrappers.<UmsUser>lambdaQuery().in(UmsUser::getId, userIds))
                         .stream()
                         .collect(Collectors.toMap(UmsUser::getId, item -> item, (a, b) -> a));
+        Map<Long, PayRefundRecord> refundMap = refundRecordMap(afterSales);
 
         return afterSales.stream()
                 .map(item -> AdminAfterSaleVO.from(
                         item,
                         orderMap.get(item.getOrderId()),
                         userMap.get(item.getUserId()),
-                        itemMap.getOrDefault(item.getOrderId(), Collections.emptyList())))
+                        itemMap.getOrDefault(item.getOrderId(), Collections.emptyList()),
+                        AdminRefundRecordVO.from(refundMap.get(item.getId()))))
                 .collect(Collectors.toList());
+    }
+
+    private Map<Long, PayRefundRecord> refundRecordMap(List<OmsAfterSale> afterSales) {
+        List<Long> afterSaleIds = afterSales.stream()
+                .map(OmsAfterSale::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(afterSaleIds)) {
+            return Collections.emptyMap();
+        }
+        return refundRecordMapper.selectList(Wrappers.<PayRefundRecord>lambdaQuery()
+                        .in(PayRefundRecord::getAfterSaleId, afterSaleIds)
+                        .orderByDesc(PayRefundRecord::getCreateTime))
+                .stream()
+                .collect(Collectors.toMap(PayRefundRecord::getAfterSaleId, item -> item, (a, b) -> a));
     }
 
     private String genAfterSaleNo(Long userId) {
@@ -473,6 +522,13 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         String tail = String.format("%04d", userId == null ? 0 : userId % 10000);
         String rnd = String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
         return "AS" + ts + tail + rnd;
+    }
+
+    private String genRefundNo(Long userId) {
+        String ts = String.format("%1$tY%1$tm%1$td%1$tH%1$tM%1$tS", new Date());
+        String tail = String.format("%04d", userId == null ? 0 : userId % 10000);
+        String rnd = String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
+        return "RF" + ts + tail + rnd;
     }
 
     private String appendCallback(String source, String text) {

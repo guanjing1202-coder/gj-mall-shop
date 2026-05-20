@@ -283,7 +283,7 @@ onMounted(loadAfterSales)
     <el-dialog v-model="returnDialogOpen" title="填写退货物流" width="480px" class="service-dialog" append-to-body>
       <div v-if="returnTarget" class="return-summary">
         <strong>{{ returnTarget.afterSaleNo }}</strong>
-        <span>提交后售后单将进入待退款状态。</span>
+        <span>提交后商家会先确认退货收货，再进入退款处理。</span>
       </div>
 
       <el-form label-position="top" @submit.prevent>

@@ -501,7 +501,7 @@ async function uploadToForm(options: any, target: string, scene: string, onUrl: 
     message.success('图片已上传')
     options.onSuccess?.(res.data)
   } catch (error) {
-    message.error('图片上传失败')
+    message.error((error as Error)?.message || '图片上传失败')
     options.onError?.(error)
   } finally {
     uploadingTarget.value = ''

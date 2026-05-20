@@ -38,6 +38,20 @@ export interface CouponCenterItem {
   status?: number
 }
 
+export interface CouponPlan {
+  orderAmount?: number
+  discountAmount?: number
+  payableAmount?: number
+  usableCount?: number
+  unavailableCount?: number
+  bestCoupon?: MyCoupon
+  nextCoupon?: MyCoupon
+  nextAmountGap?: number
+  summary?: string
+  nextHint?: string
+  candidates?: MyCoupon[]
+}
+
 export function getCouponCenter() {
   return request.get<ApiResult<CouponCenterItem[]>>('/api/coupon/center')
 }
@@ -56,6 +70,12 @@ export function getAvailableCoupons(orderAmount?: number) {
 
 export function getCheckoutCoupons(orderAmount?: number) {
   return request.get<ApiResult<MyCoupon[]>>('/api/coupon/checkout', {
+    params: { orderAmount },
+  })
+}
+
+export function getCheckoutCouponPlan(orderAmount?: number) {
+  return request.get<ApiResult<CouponPlan>>('/api/coupon/checkout-plan', {
     params: { orderAmount },
   })
 }

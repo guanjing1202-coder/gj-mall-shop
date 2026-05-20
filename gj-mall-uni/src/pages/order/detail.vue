@@ -195,7 +195,7 @@
         <view v-if="afterSaleLoading" class="empty small">售后记录加载中...</view>
         <view v-else-if="!afterSales.length" class="service-empty">
           <text>暂无售后记录</text>
-          <text>已付款、待收货或已完成订单可申请售后。</text>
+          <text>{{ afterSaleUnavailableReason || '已付款、待收货或已完成订单可申请售后。' }}</text>
         </view>
         <view v-else class="service-list">
           <view v-for="item in afterSales" :key="item.id" class="service-card">
@@ -237,8 +237,8 @@
                 />
               </view>
             </scroll-view>
-            <view v-if="[0, 1, 2].includes(Number(item.status))" class="service-actions">
-              <button v-if="Number(item.status) === 1" :disabled="serviceActionLoading === item.id" @tap="openReturnDialog(item)">
+            <view v-if="canCancelAfterSale(item.status)" class="service-actions">
+              <button v-if="canSubmitReturnLogistics(item.status)" :disabled="serviceActionLoading === item.id" @tap="openReturnDialog(item)">
                 填写物流
               </button>
               <button class="ghost" :disabled="serviceActionLoading === item.id" @tap="cancelSale(item)">取消售后</button>
@@ -264,8 +264,13 @@
           <button @tap="afterSaleDialogOpen = false">关闭</button>
         </view>
         <view class="type-row">
-          <view :class="{ active: afterSaleForm.type === 1 }" @tap="afterSaleForm.type = 1">仅退款</view>
-          <view :class="{ active: afterSaleForm.type === 2 }" @tap="afterSaleForm.type = 2">退货退款</view>
+          <view :class="{ active: afterSaleForm.type === 1 }" @tap="setAfterSaleType(1)">仅退款</view>
+          <view
+            :class="{ active: afterSaleForm.type === 2, disabled: afterSaleEligibility?.returnRefundAllowed === false }"
+            @tap="setAfterSaleType(2)"
+          >
+            退货退款
+          </view>
         </view>
         <input v-model="afterSaleForm.reason" class="field" placeholder="售后原因，例如商品破损、发错货" />
         <textarea v-model="afterSaleForm.description" class="textarea" maxlength="500" placeholder="问题描述（选填）" />
@@ -355,6 +360,7 @@ import {
   cancelOrder,
   createAfterSale,
   createOrderComment,
+  getAfterSaleEligibility,
   getOrderByNo,
   getOrderComments,
   getOrderDetail,
@@ -363,11 +369,13 @@ import {
   receiveOrder,
   submitAfterSaleReturn,
   type AfterSale,
+  type AfterSaleEligibility,
   type OrderComment,
   type OrderDetail,
   type OrderLogistics,
   type OrderItem,
 } from '@/api/order'
+import { canCancelAfterSale, canSubmitReturnLogistics } from '@/utils/after-sale-ui'
 
 const loading = ref(false)
 const actionLoading = ref(false)
@@ -384,6 +392,7 @@ const serviceActionLoading = ref<string | number>('')
 const order = ref<OrderDetail>()
 const logistics = ref<OrderLogistics>()
 const afterSales = ref<AfterSale[]>([])
+const afterSaleEligibility = ref<AfterSaleEligibility>()
 const comments = ref<OrderComment[]>([])
 const returnTarget = ref<AfterSale>()
 const commentTarget = ref<OrderItem>()
@@ -413,10 +422,17 @@ const canPay = computed(() => Number(order.value?.status) === 0)
 const canCancel = computed(() => Number(order.value?.status) === 0)
 const canReceive = computed(() => Number(order.value?.status) === 2)
 const canComment = computed(() => Number(order.value?.status) === 3)
-const hasActiveAfterSale = computed(() => afterSales.value.some((item) => [0, 1, 2].includes(Number(item.status))))
+const hasActiveAfterSale = computed(() => afterSales.value.some((item) => canCancelAfterSale(item.status)))
 const canApplyAfterSale = computed(() => {
   const status = Number(order.value?.status)
-  return [1, 2, 3].includes(status) && !hasActiveAfterSale.value
+  return [1, 2, 3].includes(status) && !hasActiveAfterSale.value && afterSaleEligibility.value?.available !== false
+})
+const afterSaleUnavailableReason = computed(() => {
+  if (hasActiveAfterSale.value) return '当前订单已有处理中售后单。'
+  if (afterSaleEligibility.value?.available === false) {
+    return afterSaleEligibility.value.unavailableReason || '当前订单暂不能申请售后。'
+  }
+  return ''
 })
 const commentMap = computed(() => {
   const map = new Map<string, OrderComment>()
@@ -456,7 +472,7 @@ async function loadByNo(orderNo: string) {
     const res = await getOrderByNo(orderNo)
     order.value = res.data
     if (res.data?.id) {
-      await Promise.all([loadAfterSales(res.data.id), loadComments(res.data.id), loadLogistics(res.data.id)])
+      await Promise.all([loadAfterSales(res.data.id), loadAfterSaleEligibility(res.data.id), loadComments(res.data.id), loadLogistics(res.data.id)])
     }
   } finally {
     loading.value = false
@@ -469,7 +485,7 @@ async function loadById(id: string | number) {
     const res = await getOrderDetail(id)
     order.value = res.data
     if (res.data?.id) {
-      await Promise.all([loadAfterSales(res.data.id), loadComments(res.data.id), loadLogistics(res.data.id)])
+      await Promise.all([loadAfterSales(res.data.id), loadAfterSaleEligibility(res.data.id), loadComments(res.data.id), loadLogistics(res.data.id)])
     }
   } finally {
     loading.value = false
@@ -483,6 +499,15 @@ async function loadAfterSales(orderId: string | number) {
     afterSales.value = res.data || []
   } finally {
     afterSaleLoading.value = false
+  }
+}
+
+async function loadAfterSaleEligibility(orderId: string | number) {
+  try {
+    const res = await getAfterSaleEligibility(orderId)
+    afterSaleEligibility.value = res.data
+  } catch {
+    afterSaleEligibility.value = undefined
   }
 }
 
@@ -537,12 +562,24 @@ async function receive() {
 }
 
 function openAfterSale() {
-  afterSaleForm.type = Number(order.value?.status) === 1 ? 1 : 2
+  if (afterSaleEligibility.value?.available === false) {
+    uni.showToast({ title: afterSaleEligibility.value.unavailableReason || '当前订单暂不能申请售后', icon: 'none' })
+    return
+  }
+  afterSaleForm.type = Number(order.value?.status) === 1 || afterSaleEligibility.value?.returnRefundAllowed === false ? 1 : 2
   afterSaleForm.reason = ''
   afterSaleForm.description = ''
   afterSaleForm.imageInput = ''
   afterSaleForm.images = []
   afterSaleDialogOpen.value = true
+}
+
+function setAfterSaleType(type: number) {
+  if (type === 2 && afterSaleEligibility.value?.returnRefundAllowed === false) {
+    uni.showToast({ title: '待发货订单仅支持仅退款', icon: 'none' })
+    return
+  }
+  afterSaleForm.type = type
 }
 
 async function submitAfterSale() {
@@ -1426,6 +1463,10 @@ function previewFormImages(kind: ImageFormKind, index: number) {
 .type-row view.active {
   background: #111827;
   color: #fff;
+}
+
+.type-row view.disabled {
+  opacity: 0.45;
 }
 
 .score-row {

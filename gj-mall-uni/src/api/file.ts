@@ -1,6 +1,8 @@
 import { getAccessToken } from '@/utils/auth'
 import { ensureSession } from '@/utils/request'
 
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024
+
 // #ifdef H5
 const BASE_URL = ''
 // #endif
@@ -17,6 +19,7 @@ export interface UploadFileResult {
 }
 
 export async function uploadImage(filePath: string, scene = 'common'): Promise<UploadFileResult> {
+  await validateLocalImage(filePath)
   const sessionReady = await ensureSession({ showToast: true, redirect: true })
   if (!sessionReady) {
     throw new Error('登录已过期')
@@ -48,5 +51,26 @@ export async function uploadImage(filePath: string, scene = 'common'): Promise<U
       },
       fail: reject,
     })
+  })
+}
+
+function validateLocalImage(filePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // #ifdef H5
+    resolve()
+    // #endif
+    // #ifndef H5
+    uni.getFileInfo({
+      filePath,
+      success: (info) => {
+        if (Number(info.size || 0) > MAX_IMAGE_SIZE) {
+          reject(new Error('图片不能超过 10MB'))
+          return
+        }
+        resolve()
+      },
+      fail: () => resolve(),
+    })
+    // #endif
   })
 }

@@ -28,6 +28,28 @@ export interface CreateOrderItemPayload {
   quantity: number
 }
 
+export interface FreightQuotePayload {
+  addressId: ApiId
+  orderAmount: number
+}
+
+export interface FreightQuote {
+  orderAmount?: number
+  freightAmount?: number
+  baseFreight?: number
+  chargedBaseFreight?: number
+  remoteExtra?: number
+  chargedRemoteExtra?: number
+  freeThreshold?: number
+  freeThresholdReached?: boolean
+  freeShipping?: boolean
+  remoteArea?: boolean
+  province?: string
+  nextFreeAmount?: number
+  summary?: string
+  hint?: string
+}
+
 export interface OrderDetail {
   id: ApiId
   orderNo: string
@@ -140,6 +162,17 @@ export interface AfterSale {
   items?: OrderItem[]
 }
 
+export interface AfterSaleEligibility {
+  available?: boolean
+  unavailableReason?: string
+  requestedType?: number
+  refundOnlyAllowed?: boolean
+  returnRefundAllowed?: boolean
+  windowDays?: number
+  startTime?: string
+  deadline?: string
+}
+
 export interface CreateAfterSalePayload {
   type: number
   reason: string
@@ -158,6 +191,10 @@ export function getOrderPage(params: OrderQuery) {
 
 export function createOrder(data: CreateOrderPayload) {
   return request<string>({ url: '/api/order', method: 'POST', data })
+}
+
+export function quoteFreight(data: FreightQuotePayload) {
+  return request<FreightQuote>({ url: '/api/order/freight/quote', method: 'POST', data })
 }
 
 export function getOrderByNo(orderNo: string) {
@@ -194,6 +231,14 @@ export function getAfterSalePage(params: OrderQuery) {
 
 export function getOrderAfterSales(orderId: ApiId) {
   return request<AfterSale[]>({ url: `/api/order/${orderId}/after-sale`, method: 'GET' })
+}
+
+export function getAfterSaleEligibility(orderId: ApiId, type?: number) {
+  return request<AfterSaleEligibility>({
+    url: `/api/order/${orderId}/after-sale/eligibility`,
+    method: 'GET',
+    data: type ? { type } : undefined,
+  })
 }
 
 export function createAfterSale(orderId: ApiId, data: CreateAfterSalePayload) {

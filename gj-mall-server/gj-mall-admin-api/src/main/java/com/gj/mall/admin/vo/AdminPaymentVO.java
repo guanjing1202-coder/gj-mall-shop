@@ -2,6 +2,7 @@ package com.gj.mall.admin.vo;
 
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.entity.PayPaymentRecord;
+import com.gj.mall.order.entity.PayRefundRecord;
 import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.order.enums.PayChannel;
 import com.gj.mall.user.entity.UmsUser;
@@ -34,10 +35,15 @@ public class AdminPaymentVO {
     private String orderStatusDesc;
     private BigDecimal orderPayAmount;
     private LocalDateTime orderPayTime;
+    private AdminRefundRecordVO refundRecord;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 
     public static AdminPaymentVO from(PayPaymentRecord record, OmsOrder order, UmsUser user) {
+        return from(record, order, user, null);
+    }
+
+    public static AdminPaymentVO from(PayPaymentRecord record, OmsOrder order, UmsUser user, PayRefundRecord refundRecord) {
         AdminPaymentVO vo = new AdminPaymentVO();
         vo.setId(record.getId());
         vo.setOrderId(record.getOrderId());
@@ -52,6 +58,7 @@ public class AdminPaymentVO {
         vo.setStatusDesc(paymentStatusDesc(record.getStatus()));
         vo.setPayTime(record.getPayTime());
         vo.setCallbackData(record.getCallbackData());
+        vo.setRefundRecord(AdminRefundRecordVO.from(refundRecord));
         vo.setCreateTime(record.getCreateTime());
         vo.setUpdateTime(record.getUpdateTime());
         if (order != null) {

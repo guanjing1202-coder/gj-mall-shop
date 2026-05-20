@@ -475,6 +475,10 @@ INSERT INTO sys_config (id, config_key, config_name, config_value, value_type, g
 (920000000000000004, 'stock.warning.default', '默认库存预警阈值', '20', 'number', 'product', '商品库存预警默认阈值', 1, 1, 0),
 (920000000000000005, 'order.auto.cancel.minutes', '未支付订单自动关闭分钟', '30', 'number', 'order', '订单超时未支付后的自动关闭时间', 1, 1, 0),
 (920000000000000006, 'order.auto.receive.days', '自动确认收货天数', '7', 'number', 'order', '发货后自动确认收货的天数', 1, 1, 0),
+(920000000000000009, 'order.freight.base', '基础运费', '12', 'number', 'order', '未满足免邮门槛时收取的基础运费', 1, 1, 0),
+(920000000000000010, 'order.freight.free.threshold', '免基础运费门槛', '99', 'number', 'order', '商品金额达到该值后免基础运费', 1, 1, 0),
+(920000000000000011, 'order.freight.remote.extra', '偏远地区附加运费', '18', 'number', 'order', '偏远地区在基础运费外加收的附加运费', 1, 1, 0),
+(920000000000000012, 'order.freight.remote.provinces', '偏远地区省份', '["新疆维吾尔自治区","西藏自治区","青海省","宁夏回族自治区","内蒙古自治区","海南省"]', 'json', 'order', '收货省份匹配后加收偏远地区运费', 1, 1, 0),
 (920000000000000007, 'marketing.coupon.visible', '优惠券入口可见', 'true', 'boolean', 'marketing', '控制前台优惠券入口展示状态', 1, 1, 0),
 (920000000000000008, 'after.sale.window.days', '售后申请时效天数', '7', 'number', 'after_sale', '订单完成后允许发起售后的天数', 1, 1, 0)
 ON DUPLICATE KEY UPDATE

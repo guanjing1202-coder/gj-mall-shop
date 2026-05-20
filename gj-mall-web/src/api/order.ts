@@ -22,6 +22,28 @@ export interface CreateOrderItemPayload {
   quantity: number
 }
 
+export interface FreightQuotePayload {
+  addressId: ApiId
+  orderAmount: number
+}
+
+export interface FreightQuote {
+  orderAmount?: number
+  freightAmount?: number
+  baseFreight?: number
+  chargedBaseFreight?: number
+  remoteExtra?: number
+  chargedRemoteExtra?: number
+  freeThreshold?: number
+  freeThresholdReached?: boolean
+  freeShipping?: boolean
+  remoteArea?: boolean
+  province?: string
+  nextFreeAmount?: number
+  summary?: string
+  hint?: string
+}
+
 export interface OrderQuery {
   pageNum?: number
   pageSize?: number
@@ -96,6 +118,17 @@ export interface CreateOrderCommentPayload {
 
 export interface AfterSaleItem extends OrderItem {}
 
+export interface AfterSaleEligibility {
+  available?: boolean
+  unavailableReason?: string
+  requestedType?: number
+  refundOnlyAllowed?: boolean
+  returnRefundAllowed?: boolean
+  windowDays?: number
+  startTime?: string
+  deadline?: string
+}
+
 export interface AfterSale {
   id: ApiId
   afterSaleNo: string
@@ -165,6 +198,10 @@ export function createOrder(data: CreateOrderPayload) {
   return request.post<ApiResult<string>>('/api/order', data)
 }
 
+export function quoteFreight(data: FreightQuotePayload) {
+  return request.post<ApiResult<FreightQuote>>('/api/order/freight/quote', data)
+}
+
 export function getOrderPage(params: OrderQuery) {
   return request.get<ApiResult<PageResult<OrderDetail>>>('/api/order/page', { params })
 }
@@ -199,6 +236,12 @@ export function createOrderComment(orderId: ApiId, data: CreateOrderCommentPaylo
 
 export function getOrderAfterSales(orderId: ApiId) {
   return request.get<ApiResult<AfterSale[]>>(`/api/order/${orderId}/after-sale`)
+}
+
+export function getAfterSaleEligibility(orderId: ApiId, type?: number) {
+  return request.get<ApiResult<AfterSaleEligibility>>(`/api/order/${orderId}/after-sale/eligibility`, {
+    params: type ? { type } : undefined,
+  })
 }
 
 export function createAfterSale(orderId: ApiId, data: CreateAfterSalePayload) {

@@ -282,7 +282,7 @@ async function uploadAvatar(options: any) {
     message.success('头像已上传')
     options.onSuccess?.(res.data)
   } catch (error) {
-    message.error('头像上传失败')
+    message.error((error as Error)?.message || '头像上传失败')
     options.onError?.(error)
   } finally {
     avatarUploading.value = false

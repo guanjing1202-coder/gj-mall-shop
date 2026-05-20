@@ -122,6 +122,7 @@ async function uploadAvatar(options: UploadRequestOptions) {
     ElMessage.success('头像已上传，保存资料后生效')
     options.onSuccess(res.data)
   } catch (error) {
+    ElMessage.error((error as Error)?.message || '头像上传失败')
     options.onError(error as any)
   } finally {
     avatarUploading.value = false

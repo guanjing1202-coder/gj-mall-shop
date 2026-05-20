@@ -49,6 +49,7 @@ public class AdminAfterSaleVO {
     private BigDecimal orderPayAmount;
     private Integer currentOrderStatus;
     private String currentOrderStatusDesc;
+    private AdminRefundRecordVO refundRecord;
     private List<OmsOrderItem> items;
 
     public static AdminAfterSaleVO from(
@@ -56,6 +57,15 @@ public class AdminAfterSaleVO {
             OmsOrder order,
             UmsUser user,
             List<OmsOrderItem> items) {
+        return from(afterSale, order, user, items, null);
+    }
+
+    public static AdminAfterSaleVO from(
+            OmsAfterSale afterSale,
+            OmsOrder order,
+            UmsUser user,
+            List<OmsOrderItem> items,
+            AdminRefundRecordVO refundRecord) {
         AdminAfterSaleVO vo = new AdminAfterSaleVO();
         vo.setId(afterSale.getId());
         vo.setAfterSaleNo(afterSale.getAfterSaleNo());
@@ -83,6 +93,7 @@ public class AdminAfterSaleVO {
         vo.setCreateTime(afterSale.getCreateTime());
         vo.setUpdateTime(afterSale.getUpdateTime());
         vo.setItems(items == null ? Collections.emptyList() : items);
+        vo.setRefundRecord(refundRecord);
         if (order != null) {
             vo.setOrderPayAmount(order.getPayAmount());
             vo.setCurrentOrderStatus(order.getStatus());

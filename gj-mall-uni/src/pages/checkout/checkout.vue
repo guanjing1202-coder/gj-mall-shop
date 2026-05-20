@@ -80,6 +80,14 @@
           <text>{{ usableCouponCount }} 张可用</text>
           <text>{{ unavailableCouponCount }} 张暂不可用</text>
         </view>
+        <view v-if="couponPlan" class="coupon-plan" :class="{ active: couponPlan.bestCoupon, pending: !couponPlan.bestCoupon && couponPlan.nextCoupon }">
+          <view>
+            <text>{{ couponPlan.bestCoupon ? '最优优惠' : couponPlan.nextCoupon ? '凑单提醒' : '优惠状态' }}</text>
+            <text>{{ couponPlan.summary }}</text>
+            <text v-if="couponPlan.nextHint">{{ couponPlan.nextHint }}</text>
+          </view>
+          <text v-if="Number(couponPlan.discountAmount || 0) > 0">-{{ formatPrice(couponPlan.discountAmount) }}</text>
+        </view>
         <view class="coupon-card" :class="{ active: !selectedCouponId }" @tap="selectedCouponId = ''">
           <text>不使用优惠券</text>
           <text>直接按商品金额结算</text>
@@ -153,11 +161,18 @@
         </view>
         <view>
           <text>运费</text>
-          <text>{{ formatPrice(0) }}</text>
+          <text>{{ freightLoading ? '计算中' : formatPrice(freightAmount) }}</text>
+        </view>
+        <view class="summary-tip freight">
+          <text>{{ freightQuote?.summary || '选择地址后计算运费' }}</text>
+          <text v-if="freightQuote?.hint">{{ freightQuote.hint }}</text>
         </view>
         <view>
           <text>优惠</text>
           <text>-{{ formatPrice(couponDiscount) }}</text>
+        </view>
+        <view v-if="couponPlan?.nextHint" class="summary-tip">
+          <text>{{ couponPlan.nextHint }}</text>
         </view>
         <view class="total">
           <text>应付</text>
@@ -200,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import {
   addAddress,
@@ -212,8 +227,8 @@ import {
   type AddressPayload,
 } from '@/api/address'
 import { getCart, type CartInfo, type CartItem } from '@/api/cart'
-import { getCheckoutCoupons, type MyCoupon } from '@/api/coupon'
-import { createOrder } from '@/api/order'
+import { getCheckoutCouponPlan, type CouponPlan, type MyCoupon } from '@/api/coupon'
+import { createOrder, quoteFreight, type FreightQuote } from '@/api/order'
 import { getProductDetail, type ApiId } from '@/api/product'
 import { requireSession, syncSession } from '@/utils/session'
 
@@ -228,6 +243,7 @@ const isLoggedIn = ref(false)
 const cartLoading = ref(false)
 const addressLoading = ref(false)
 const couponLoading = ref(false)
+const freightLoading = ref(false)
 const submitting = ref(false)
 const addressDialogOpen = ref(false)
 const addressSaving = ref(false)
@@ -238,6 +254,8 @@ const remark = ref('')
 const cart = ref<CartInfo>(emptyCart())
 const addresses = ref<AddressItem[]>([])
 const coupons = ref<MyCoupon[]>([])
+const couponPlan = ref<CouponPlan>()
+const freightQuote = ref<FreightQuote>()
 const directBuyMode = ref(false)
 const directBuySpuId = ref<ApiId>()
 const directBuySkuId = ref<ApiId>()
@@ -265,9 +283,14 @@ const invoiceForm = reactive({
 const selectedItems = computed(() => cart.value.items.filter((item) => item.selected === 1 && !item.invalid))
 const selectedCoupon = computed(() => coupons.value.find((item) => String(item.couponId) === String(selectedCouponId.value) && isCouponUsable(item)))
 const couponDiscount = computed(() => (selectedCoupon.value ? couponDiscountValue(selectedCoupon.value) : 0))
-const finalAmount = computed(() => Math.max(Number(cart.value.selectedAmount || 0) - couponDiscount.value, 0))
+const freightAmount = computed(() => Number(freightQuote.value?.freightAmount || 0))
+const finalAmount = computed(() => Math.max(Number(cart.value.selectedAmount || 0) + freightAmount.value - couponDiscount.value, 0))
 const usableCouponCount = computed(() => coupons.value.filter(isCouponUsable).length)
 const unavailableCouponCount = computed(() => coupons.value.length - usableCouponCount.value)
+
+watch([selectedAddressId, () => cart.value.selectedAmount], () => {
+  loadFreight()
+})
 
 onLoad((options: any) => {
   if (options?.skuId) {
@@ -284,10 +307,11 @@ onShow(async () => {
     cart.value = emptyCart()
     addresses.value = []
     coupons.value = []
+    couponPlan.value = undefined
     return
   }
   await Promise.all([loadCheckoutItems(), loadAddresses()])
-  await loadCoupons()
+  await Promise.all([loadCoupons(), loadFreight()])
 })
 
 async function loadCheckoutItems() {
@@ -377,15 +401,34 @@ async function loadAddresses() {
 async function loadCoupons() {
   couponLoading.value = true
   try {
-    const res = await getCheckoutCoupons(Number(cart.value.selectedAmount || 0))
-    coupons.value = res.data || []
+    const res = await getCheckoutCouponPlan(Number(cart.value.selectedAmount || 0))
+    couponPlan.value = res.data
+    coupons.value = res.data?.candidates || []
     const available = coupons.value.some((item) => String(item.couponId) === String(selectedCouponId.value) && isCouponUsable(item))
     if (!available) {
-      const best = coupons.value.filter(isCouponUsable).sort((a, b) => couponDiscountValue(b) - couponDiscountValue(a))[0]
-      selectedCouponId.value = best?.couponId || ''
+      selectedCouponId.value = res.data?.bestCoupon?.couponId || ''
     }
   } finally {
     couponLoading.value = false
+  }
+}
+
+async function loadFreight() {
+  if (!selectedAddressId.value || Number(cart.value.selectedAmount || 0) <= 0) {
+    freightQuote.value = undefined
+    return
+  }
+  freightLoading.value = true
+  try {
+    const res = await quoteFreight({
+      addressId: selectedAddressId.value,
+      orderAmount: Number(cart.value.selectedAmount || 0),
+    })
+    freightQuote.value = res.data
+  } catch {
+    freightQuote.value = undefined
+  } finally {
+    freightLoading.value = false
   }
 }
 
@@ -440,12 +483,14 @@ async function makeDefault(address: AddressItem) {
   await setDefaultAddress(address.id)
   selectedAddressId.value = address.id
   await loadAddresses()
+  await loadFreight()
 }
 
 async function removeAddress(address: AddressItem) {
   await deleteAddress(address.id)
   if (String(selectedAddressId.value) === String(address.id)) selectedAddressId.value = ''
   await loadAddresses()
+  await loadFreight()
 }
 
 async function submit() {
@@ -876,6 +921,64 @@ function normalizeImage(url?: string, seed = 'checkout') {
   font-weight: 800;
 }
 
+.coupon-plan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 14rpx;
+  padding: 20rpx;
+  border: 2rpx solid #eef0f3;
+  border-radius: 14rpx;
+  background: #f8fafc;
+}
+
+.coupon-plan.active {
+  border-color: rgba(229, 72, 77, 0.32);
+  background: #fff7f7;
+}
+
+.coupon-plan.pending {
+  border-color: rgba(47, 143, 103, 0.32);
+  background: #f4fbf7;
+}
+
+.coupon-plan view {
+  min-width: 0;
+}
+
+.coupon-plan text {
+  display: block;
+}
+
+.coupon-plan view text:first-child {
+  color: #e5484d;
+  font-size: 22rpx;
+  font-weight: 900;
+}
+
+.coupon-plan view text:nth-child(2) {
+  margin-top: 8rpx;
+  color: #111827;
+  font-size: 26rpx;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.coupon-plan view text:nth-child(3) {
+  margin-top: 8rpx;
+  color: #6b7280;
+  font-size: 23rpx;
+  line-height: 1.45;
+}
+
+.coupon-plan > text {
+  flex: 0 0 auto;
+  color: #e5484d;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
 .coupon-card text {
   display: block;
 }
@@ -957,6 +1060,20 @@ function normalizeImage(url?: string, seed = 'checkout') {
   padding: 12rpx 0;
   color: #6b7280;
   font-size: 25rpx;
+}
+
+.summary .summary-tip {
+  display: block;
+  padding: 14rpx 0;
+  border-top: 1rpx solid #eef0f3;
+}
+
+.summary .summary-tip text {
+  display: block;
+  color: #2f8f67;
+  font-size: 23rpx;
+  font-weight: 900;
+  line-height: 1.45;
 }
 
 .summary .total {

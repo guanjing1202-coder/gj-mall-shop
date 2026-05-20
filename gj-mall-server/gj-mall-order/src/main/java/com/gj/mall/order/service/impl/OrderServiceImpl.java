@@ -24,7 +24,9 @@ import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.order.mapper.OmsOrderItemMapper;
 import com.gj.mall.order.mapper.OmsOrderMapper;
 import com.gj.mall.order.mq.OrderTimeoutProducer;
+import com.gj.mall.order.service.FreightService;
 import com.gj.mall.order.service.OrderService;
+import com.gj.mall.order.vo.FreightQuoteVO;
 import com.gj.mall.order.vo.OrderItemVO;
 import com.gj.mall.order.vo.InvoiceVO;
 import com.gj.mall.order.vo.OrderLogisticsTraceVO;
@@ -67,6 +69,7 @@ public class OrderServiceImpl implements OrderService {
     private final CouponService couponService;
     private final PmsSpuMapper spuMapper;
     private final UserMessageService messageService;
+    private final FreightService freightService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -104,7 +107,8 @@ public class OrderServiceImpl implements OrderService {
         BigDecimal totalAmount = selected.stream()
                 .map(i -> i.getPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal freight = BigDecimal.ZERO;       // TODO：运费规则
+        FreightQuoteVO freightQuote = freightService.calculate(totalAmount, addr);
+        BigDecimal freight = freightQuote.getFreightAmount();
         CouponCheckResult couponResult = couponService.check(userId, dto.getCouponId(), totalAmount);
         BigDecimal coupon  = couponResult.getDiscountAmount();
         BigDecimal payAmount = totalAmount.add(freight).subtract(coupon);
@@ -647,7 +651,9 @@ public class OrderServiceImpl implements OrderService {
         BeanUtil.copyProperties(addr, receiver);
 
         BigDecimal totalAmount = seckillSku.getSeckillPrice();
-        BigDecimal payAmount   = totalAmount;  // 秒杀无优惠券
+        FreightQuoteVO freightQuote = freightService.calculate(totalAmount, addr);
+        BigDecimal freight = freightQuote.getFreightAmount();
+        BigDecimal payAmount = totalAmount.add(freight);  // 秒杀无优惠券
 
         OmsOrder order = new OmsOrder();
         String orderNo = genOrderNo(userId);
@@ -655,7 +661,7 @@ public class OrderServiceImpl implements OrderService {
         order.setUserId(userId);
         order.setTotalAmount(totalAmount);
         order.setPayAmount(payAmount);
-        order.setFreightAmount(BigDecimal.ZERO);
+        order.setFreightAmount(freight);
         order.setCouponAmount(BigDecimal.ZERO);
         order.setStatus(OrderStatus.PENDING_PAY.getCode());
         order.setReceiverInfo(JSON.toJSONString(receiver));

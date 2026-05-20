@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
 import {
@@ -23,6 +23,7 @@ import {
 } from '@/api/afterSale'
 
 const route = useRoute()
+const router = useRouter()
 
 interface CreateFormState {
   orderId?: ApiId
@@ -331,6 +332,27 @@ function openAction(mode: ActionMode, record: AfterSaleRecord) {
   actionOpen.value = true
 }
 
+function actionTip() {
+  if (!actionTarget.value) {
+    return ''
+  }
+  if (actionMode.value === 'approve') {
+    return actionTarget.value.type === 2
+      ? '通过后用户需要先填写退货物流，商家确认收货后才能退款。'
+      : '通过后售后单会进入待退款，下一步可执行全额退款。'
+  }
+  if (actionMode.value === 'receive') {
+    return '确认收货后售后单进入待退款，退货物流会保留到售后详情。'
+  }
+  if (actionMode.value === 'refund') {
+    return `将按售后金额 ${formatMoney(actionTarget.value.amount)} 创建退款流水，并同步支付记录为已退款。`
+  }
+  if (actionMode.value === 'cancel') {
+    return '取消后订单状态会恢复到发起售后前的状态。'
+  }
+  return '拒绝后订单状态会恢复到发起售后前的状态。'
+}
+
 async function submitAction() {
   if (!actionTarget.value) {
     return
@@ -433,6 +455,24 @@ function canRefund(record: AfterSaleRecord) {
 
 function canCancel(record: AfterSaleRecord) {
   return record.status === 0 || record.status === 1 || record.status === 2
+}
+
+function goPayment(record?: AfterSaleRecord) {
+  const keyword = record?.refundRecord?.payNo || record?.orderNo
+  router.push({ name: 'Payment', query: keyword ? { keyword } : undefined })
+}
+
+function refundOperatorText(value?: string) {
+  if (value === 'admin_after_sale') {
+    return '售后后台'
+  }
+  if (value === 'admin_payment') {
+    return '支付后台'
+  }
+  if (value === 'system') {
+    return '系统'
+  }
+  return value || '--'
 }
 
 function userText(record?: AfterSaleRecord) {
@@ -754,11 +794,42 @@ function createEmptySummary(): AfterSaleSummary {
           <a-descriptions-item label="审核备注">{{ currentAfterSale.auditRemark || '--' }}</a-descriptions-item>
           <a-descriptions-item label="拒绝原因">{{ currentAfterSale.rejectReason || '--' }}</a-descriptions-item>
           <a-descriptions-item label="退货物流">{{ [currentAfterSale.returnCompany, currentAfterSale.returnNo].filter(Boolean).join(' / ') || '--' }}</a-descriptions-item>
-          <a-descriptions-item label="退款流水ID">{{ currentAfterSale.refundPaymentId || '--' }}</a-descriptions-item>
+          <a-descriptions-item label="退款记录">{{ currentAfterSale.refundRecord?.refundNo || currentAfterSale.refundPaymentId || '--' }}</a-descriptions-item>
           <a-descriptions-item label="申请时间">{{ currentAfterSale.createTime || '--' }}</a-descriptions-item>
           <a-descriptions-item label="退款时间">{{ currentAfterSale.refundTime || '--' }}</a-descriptions-item>
           <a-descriptions-item label="问题描述" :span="2">{{ currentAfterSale.description || '--' }}</a-descriptions-item>
         </a-descriptions>
+
+        <div style="margin-top: 20px">
+          <h4 style="margin-bottom: 12px">退款记录</h4>
+          <div v-if="currentAfterSale.refundRecord" class="refund-record-card">
+            <div class="refund-record-card__main">
+              <span>退款流水</span>
+              <strong>{{ currentAfterSale.refundRecord.refundNo }}</strong>
+              <small>
+                {{ currentAfterSale.refundRecord.channelDesc || '--' }} ·
+                {{ refundOperatorText(currentAfterSale.refundRecord.operatorType) }} ·
+                {{ currentAfterSale.refundRecord.successTime || currentAfterSale.refundRecord.createTime || '--' }}
+              </small>
+            </div>
+            <div class="refund-record-card__amount">
+              <span>{{ currentAfterSale.refundRecord.statusDesc || '--' }}</span>
+              <strong>{{ formatMoney(currentAfterSale.refundRecord.amount) }}</strong>
+            </div>
+            <div class="refund-record-card__meta">
+              <span>支付流水：{{ currentAfterSale.refundRecord.payNo || '--' }}</span>
+              <span>退款原因：{{ currentAfterSale.refundRecord.reason || '--' }}</span>
+            </div>
+            <div class="refund-record-card__actions">
+              <a-button size="small" type="link" @click="goPayment(currentAfterSale)">查看支付流水</a-button>
+            </div>
+          </div>
+          <a-empty v-else :image="false" description="暂无退款记录">
+            <template #description>
+              <span>售后进入待退款后，点击“确认退款”会生成退款流水。</span>
+            </template>
+          </a-empty>
+        </div>
 
         <div style="margin-top: 20px">
           <h4 style="margin-bottom: 12px">订单商品</h4>
@@ -828,6 +899,13 @@ function createEmptySummary(): AfterSaleSummary {
       <a-form-item label="售后单">
         <a-input :value="actionTarget?.afterSaleNo" disabled />
       </a-form-item>
+      <a-alert v-if="actionTip()" :message="actionTip()" type="info" show-icon style="margin-bottom: 16px" />
+      <a-descriptions v-if="actionTarget" :column="2" size="small" bordered style="margin-bottom: 16px">
+        <a-descriptions-item label="状态">{{ actionTarget.statusDesc || '--' }}</a-descriptions-item>
+        <a-descriptions-item label="金额">{{ formatMoney(actionTarget.amount) }}</a-descriptions-item>
+        <a-descriptions-item label="订单">{{ actionTarget.orderNo }}</a-descriptions-item>
+        <a-descriptions-item label="会员">{{ userText(actionTarget) }}</a-descriptions-item>
+      </a-descriptions>
       <a-form-item v-if="actionMode === 'reject'" label="拒绝原因">
         <a-textarea v-model:value="actionForm.rejectReason" :rows="3" placeholder="请输入拒绝原因" />
       </a-form-item>
@@ -950,6 +1028,63 @@ function createEmptySummary(): AfterSaleSummary {
 
 .type-title {
   margin-bottom: 8px;
+}
+
+.refund-record-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 12px 18px;
+  padding: 16px 18px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.refund-record-card__main span,
+.refund-record-card__main small,
+.refund-record-card__amount span,
+.refund-record-card__meta span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.refund-record-card__main strong {
+  display: block;
+  margin: 6px 0;
+  color: #111827;
+  font-size: 18px;
+  word-break: break-all;
+}
+
+.refund-record-card__amount {
+  text-align: right;
+}
+
+.refund-record-card__amount span {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.refund-record-card__amount strong {
+  display: block;
+  margin-top: 6px;
+  color: #dc2626;
+  font-size: 22px;
+}
+
+.refund-record-card__meta {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f5;
+}
+
+.refund-record-card__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
 }
 
 @media (max-width: 1400px) {

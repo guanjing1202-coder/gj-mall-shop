@@ -18,7 +18,9 @@ import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.order.mapper.OmsAfterSaleMapper;
 import com.gj.mall.order.mapper.OmsOrderItemMapper;
 import com.gj.mall.order.mapper.OmsOrderMapper;
+import com.gj.mall.order.service.AfterSaleRuleService;
 import com.gj.mall.order.service.AfterSaleService;
+import com.gj.mall.order.vo.AfterSaleEligibilityVO;
 import com.gj.mall.order.vo.AfterSaleVO;
 import com.gj.mall.user.service.UserMessageService;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +28,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -49,13 +50,14 @@ public class AfterSaleServiceImpl implements AfterSaleService {
     private final OmsOrderMapper orderMapper;
     private final OmsOrderItemMapper orderItemMapper;
     private final UserMessageService messageService;
+    private final AfterSaleRuleService ruleService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AfterSaleVO apply(Long userId, Long orderId, AfterSaleApplyDTO dto) {
         validateApplyDTO(dto);
         OmsOrder order = mustOwnOrder(userId, orderId);
-        validateOrderCanAfterSale(order);
+        ruleService.validateApply(order, dto.getType());
 
         Long activeCount = afterSaleMapper.selectCount(Wrappers.<OmsAfterSale>lambdaQuery()
                 .eq(OmsAfterSale::getOrderId, order.getId())
@@ -87,6 +89,12 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         updateOrderStatus(order.getId(), OrderStatus.REFUNDING.getCode());
         notifyUser(userId, "after_sale", "售后申请已提交", "售后单 " + afterSale.getAfterSaleNo() + " 已提交，商家会尽快审核。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
         return enrich(Collections.singletonList(afterSale)).get(0);
+    }
+
+    @Override
+    public AfterSaleEligibilityVO eligibility(Long userId, Long orderId, Integer type) {
+        OmsOrder order = mustOwnOrder(userId, orderId);
+        return ruleService.evaluate(order, type);
     }
 
     @Override
@@ -165,15 +173,6 @@ public class AfterSaleServiceImpl implements AfterSaleService {
         }
         if (StrUtil.isBlank(dto.getReason())) {
             throw new BizException(ResultCode.PARAM_MISSING, "售后原因不能为空");
-        }
-    }
-
-    private void validateOrderCanAfterSale(OmsOrder order) {
-        if (OrderStatus.PENDING_PAY.getCode().equals(order.getStatus())
-                || OrderStatus.CANCELED.getCode().equals(order.getStatus())
-                || OrderStatus.REFUNDING.getCode().equals(order.getStatus())
-                || OrderStatus.REFUNDED.getCode().equals(order.getStatus())) {
-            throw new BizException(ResultCode.ORDER_STATUS_ERROR, "当前订单状态不可发起售后");
         }
     }
 

@@ -430,6 +430,35 @@ CREATE TABLE pay_payment_record (
     KEY idx_order (order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付记录';
 
+DROP TABLE IF EXISTS pay_refund_record;
+CREATE TABLE pay_refund_record (
+    id              BIGINT          NOT NULL,
+    refund_no       VARCHAR(64)     NOT NULL                COMMENT '退款流水号',
+    payment_id      BIGINT          NOT NULL                COMMENT '支付记录ID',
+    pay_no          VARCHAR(64)     NOT NULL                COMMENT '内部支付流水号',
+    third_pay_no    VARCHAR(64)     DEFAULT NULL            COMMENT '第三方支付流水号',
+    after_sale_id   BIGINT          DEFAULT NULL            COMMENT '售后单ID',
+    after_sale_no   VARCHAR(40)     DEFAULT NULL            COMMENT '售后单号',
+    order_id        BIGINT          NOT NULL,
+    order_no        VARCHAR(32)     NOT NULL,
+    user_id         BIGINT          NOT NULL,
+    channel         TINYINT         NOT NULL                COMMENT '1微信 2支付宝 3余额 9MOCK',
+    amount          DECIMAL(10,2)   NOT NULL,
+    status          TINYINT         NOT NULL DEFAULT 0      COMMENT '0退款中 1退款成功 2退款失败',
+    reason          VARCHAR(255)    DEFAULT NULL            COMMENT '退款原因',
+    operator_type   VARCHAR(32)     DEFAULT NULL            COMMENT '触发来源 admin_after_sale/admin_payment/system',
+    callback_data   TEXT            DEFAULT NULL,
+    success_time    DATETIME        DEFAULT NULL,
+    create_time     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_refund_no (refund_no),
+    UNIQUE KEY uk_after_sale (after_sale_id),
+    KEY idx_payment (payment_id),
+    KEY idx_order (order_id),
+    KEY idx_status_time (status, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退款记录';
+
 DROP TABLE IF EXISTS pay_callback_record;
 CREATE TABLE pay_callback_record (
     id                  BIGINT          NOT NULL,

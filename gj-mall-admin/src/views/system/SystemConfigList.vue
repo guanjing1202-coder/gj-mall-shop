@@ -5,20 +5,26 @@ import { message, Modal } from 'ant-design-vue'
 import {
   DeleteOutlined,
   EditOutlined,
+  FolderOpenOutlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
   SearchOutlined,
+  WarningOutlined,
 } from '@ant-design/icons-vue'
 import {
+  cleanupUploadStorage,
   createSystemConfig,
   deleteSystemConfig,
   getSystemConfigPage,
+  getUploadStorageSummary,
   updateSystemConfig,
   updateSystemConfigStatus,
   type ApiId,
   type SystemConfigPayload,
   type SystemConfigRecord,
+  type UploadCleanupResult,
+  type UploadStorageSummary,
 } from '@/api/systemConfig'
 
 const loading = ref(false)
@@ -27,6 +33,12 @@ const modalLoading = ref(false)
 const formRef = ref<FormInstance>()
 const editing = ref(false)
 const configs = ref<SystemConfigRecord[]>([])
+const storageLoading = ref(false)
+const cleanupLoading = ref(false)
+const storageSummary = ref<UploadStorageSummary>()
+const cleanupPreview = ref<UploadCleanupResult>()
+const cleanupPreviewOpen = ref(false)
+const retainDays = ref(7)
 
 const pagination = reactive({
   current: 1,
@@ -84,8 +96,15 @@ const groupCount = computed(() => new Set(configs.value.map((item) => item.group
 const editableCount = computed(() => configs.value.filter((item) => item.editable === 1).length)
 const totalCount = computed(() => pagination.total)
 const editableGroupOptions = computed(() => groupOptions.filter((option) => option.value))
+const cleanupCandidateCount = computed(() => Number(storageSummary.value?.cleanupCandidates || 0))
+const totalUploadFiles = computed(() => Number(storageSummary.value?.totalFiles || 0))
+const referencedUploadFiles = computed(() => Number(storageSummary.value?.referencedFiles || 0))
+const orphanUploadFiles = computed(() => Number(storageSummary.value?.orphanFiles || 0))
 
-onMounted(fetchConfigs)
+onMounted(() => {
+  fetchConfigs()
+  fetchUploadStorage()
+})
 
 async function fetchConfigs() {
   loading.value = true
@@ -229,6 +248,57 @@ function handleSwitchChange(record: SystemConfigRecord, checked: unknown) {
 function toRecord(record: Record<string, any>) {
   return record as SystemConfigRecord
 }
+
+async function fetchUploadStorage() {
+  storageLoading.value = true
+  try {
+    const res = await getUploadStorageSummary(retainDays.value)
+    storageSummary.value = res.data
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+async function previewCleanup() {
+  cleanupLoading.value = true
+  try {
+    const res = await cleanupUploadStorage(retainDays.value, true)
+    cleanupPreview.value = res.data
+    cleanupPreviewOpen.value = true
+  } finally {
+    cleanupLoading.value = false
+  }
+}
+
+function confirmCleanup() {
+  const candidates = Number(cleanupPreview.value?.candidateFiles || storageSummary.value?.cleanupCandidates || 0)
+  Modal.confirm({
+    title: '清理未引用上传文件',
+    content: `将删除 ${candidates} 个超过 ${retainDays.value} 天且未被数据库引用的上传文件。此操作不可恢复，确认继续吗？`,
+    okText: '确认清理',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      cleanupLoading.value = true
+      try {
+        const res = await cleanupUploadStorage(retainDays.value, false)
+        message.success(`已清理 ${res.data.deletedFiles || 0} 个文件，释放 ${formatSize(res.data.deletedSize || 0)}`)
+        cleanupPreviewOpen.value = false
+        await fetchUploadStorage()
+      } finally {
+        cleanupLoading.value = false
+      }
+    },
+  })
+}
+
+function formatSize(value?: number) {
+  const bytes = Number(value || 0)
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
 </script>
 
 <template>
@@ -261,6 +331,57 @@ function toRecord(record: Record<string, any>) {
         <span>可编辑项</span>
         <strong>{{ editableCount }}</strong>
       </div>
+    </section>
+
+    <section class="storage-panel">
+      <div class="storage-head">
+        <div>
+          <div class="page-kicker">Upload Storage</div>
+          <h2>上传文件体检</h2>
+          <p>{{ storageSummary?.rootPath || '本地上传目录' }}</p>
+        </div>
+        <a-space>
+          <a-input-number v-model:value="retainDays" :min="0" :max="3650" addon-after="天" />
+          <a-button :loading="storageLoading" @click="fetchUploadStorage">
+            <template #icon><ReloadOutlined /></template>
+            刷新
+          </a-button>
+          <a-button :loading="cleanupLoading" @click="previewCleanup">
+            <template #icon><FolderOpenOutlined /></template>
+            预览清理
+          </a-button>
+        </a-space>
+      </div>
+      <div class="storage-metrics" :class="{ loading: storageLoading }">
+        <div>
+          <span>上传文件</span>
+          <strong>{{ totalUploadFiles }}</strong>
+          <small>{{ formatSize(storageSummary?.totalSize) }}</small>
+        </div>
+        <div>
+          <span>数据库引用</span>
+          <strong>{{ referencedUploadFiles }}</strong>
+          <small>{{ storageSummary?.referenceCount || 0 }} 条 URL</small>
+        </div>
+        <div>
+          <span>未引用文件</span>
+          <strong>{{ orphanUploadFiles }}</strong>
+          <small>{{ formatSize(storageSummary?.orphanSize) }}</small>
+        </div>
+        <div class="danger">
+          <span>可清理候选</span>
+          <strong>{{ cleanupCandidateCount }}</strong>
+          <small>{{ formatSize(storageSummary?.cleanupCandidateSize) }}</small>
+        </div>
+      </div>
+      <a-alert
+        v-if="cleanupCandidateCount > 0"
+        type="warning"
+        show-icon
+        class="storage-alert"
+        :message="`发现 ${cleanupCandidateCount} 个超过 ${retainDays} 天且未被引用的上传文件`"
+        description="建议先预览清理清单，确认没有人工保留需求后再执行删除。"
+      />
     </section>
 
     <section class="config-panel">
@@ -423,6 +544,47 @@ function toRecord(record: Record<string, any>) {
         </a-button>
       </template>
     </a-modal>
+
+    <a-modal
+      v-model:open="cleanupPreviewOpen"
+      title="未引用文件清理预览"
+      width="860px"
+    >
+      <a-alert
+        type="info"
+        show-icon
+        class="storage-alert"
+        :message="`候选 ${cleanupPreview?.candidateFiles || 0} 个文件，可释放 ${formatSize(cleanupPreview?.candidateSize)}`"
+        description="预览模式不会删除文件；执行清理时只处理超过保留天数且数据库未引用的本地上传文件。"
+      />
+      <a-list
+        class="orphan-list"
+        :data-source="cleanupPreview?.files || []"
+        :pagination="(cleanupPreview?.files?.length || 0) > 8 ? { pageSize: 8 } : false"
+      >
+        <template #renderItem="{ item }">
+          <a-list-item>
+            <a-list-item-meta>
+              <template #avatar>
+                <WarningOutlined class="orphan-icon" />
+              </template>
+              <template #title>
+                <code>{{ item.relativePath }}</code>
+              </template>
+              <template #description>
+                {{ item.lastModified || '--' }} · {{ formatSize(item.size) }}
+              </template>
+            </a-list-item-meta>
+          </a-list-item>
+        </template>
+      </a-list>
+      <template #footer>
+        <a-button @click="cleanupPreviewOpen = false">关闭</a-button>
+        <a-button danger type="primary" :disabled="!cleanupPreview?.candidateFiles" :loading="cleanupLoading" @click="confirmCleanup">
+          确认清理
+        </a-button>
+      </template>
+    </a-modal>
   </div>
 </template>
 
@@ -508,6 +670,85 @@ function toRecord(record: Record<string, any>) {
 
 .accent-rose {
   border-top: 3px solid #be365d;
+}
+
+.storage-panel {
+  margin-bottom: 16px;
+  padding: 18px;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(20, 31, 43, 0.06);
+}
+
+.storage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.storage-head h2 {
+  margin: 0;
+  color: #17212b;
+  font-size: 20px;
+}
+
+.storage-head p {
+  margin: 6px 0 0;
+  color: #657384;
+  font-size: 13px;
+}
+
+.storage-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.storage-metrics > div {
+  padding: 14px;
+  border: 1px solid #edf1f6;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.storage-metrics span,
+.storage-metrics small {
+  display: block;
+  color: #657384;
+  font-size: 12px;
+}
+
+.storage-metrics strong {
+  display: block;
+  margin: 8px 0 4px;
+  color: #17212b;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.storage-metrics .danger {
+  border-color: #f7d9df;
+  background: #fff7f8;
+}
+
+.storage-metrics .danger strong {
+  color: #be365d;
+}
+
+.storage-alert {
+  margin-top: 14px;
+}
+
+.orphan-list {
+  margin-top: 14px;
+}
+
+.orphan-icon {
+  color: #be365d;
+  font-size: 18px;
 }
 
 .config-panel {
@@ -627,6 +868,14 @@ function toRecord(record: Record<string, any>) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .storage-head {
+    flex-direction: column;
+  }
+
+  .storage-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .toolbar-actions {
     width: 100%;
     margin-left: 0;
@@ -635,6 +884,10 @@ function toRecord(record: Record<string, any>) {
 
 @media (max-width: 560px) {
   .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .storage-metrics {
     grid-template-columns: 1fr;
   }
 

@@ -5,6 +5,7 @@ import com.gj.mall.marketing.dto.CouponCreateDTO;
 import com.gj.mall.marketing.entity.SmsCoupon;
 import com.gj.mall.marketing.vo.CouponCheckResult;
 import com.gj.mall.marketing.vo.CouponCenterVO;
+import com.gj.mall.marketing.vo.CouponPlanVO;
 import com.gj.mall.marketing.vo.CouponVO;
 import com.gj.mall.marketing.vo.MyCouponVO;
 
@@ -25,6 +26,9 @@ public interface CouponService {
 
     /** 结算页优惠券候选列表：包含可用券和不可用原因 */
     List<MyCouponVO> checkoutList(Long userId, BigDecimal orderAmount);
+
+    /** 结算页优惠方案：最优券、凑单提示和候选券 */
+    CouponPlanVO checkoutPlan(Long userId, BigDecimal orderAmount);
 
     /** 领券中心：上架、有效、仍有余量的优惠券 */
     List<CouponCenterVO> centerList();

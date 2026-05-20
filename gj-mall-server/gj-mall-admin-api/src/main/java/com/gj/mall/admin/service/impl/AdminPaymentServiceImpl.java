@@ -19,11 +19,13 @@ import com.gj.mall.common.result.PageResult;
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.entity.PayCallbackRecord;
 import com.gj.mall.order.entity.PayPaymentRecord;
+import com.gj.mall.order.entity.PayRefundRecord;
 import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.order.enums.PayChannel;
 import com.gj.mall.order.mapper.OmsOrderMapper;
 import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
+import com.gj.mall.order.mapper.PayRefundRecordMapper;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.mapper.UmsUserMapper;
@@ -45,6 +47,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
 
     private final PayPaymentRecordMapper recordMapper;
     private final PayCallbackRecordMapper callbackRecordMapper;
+    private final PayRefundRecordMapper refundRecordMapper;
     private final OmsOrderMapper orderMapper;
     private final UmsUserMapper userMapper;
     private final OrderService orderService;
@@ -215,13 +218,40 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         if (amount.compareTo(record.getAmount()) != 0) {
             throw new BizException(ResultCode.OPERATION_FORBIDDEN, "当前版本仅支持全额退款");
         }
+        PayRefundRecord existingRefund = refundRecordMapper.selectOne(Wrappers.<PayRefundRecord>lambdaQuery()
+                .eq(PayRefundRecord::getPaymentId, record.getId())
+                .last("LIMIT 1"));
+        if (existingRefund != null) {
+            throw new BizException(ResultCode.DATA_EXISTS, "退款记录已存在，请勿重复退款");
+        }
+        String reason = dto == null ? null : StrUtil.trim(dto.getReason());
+        LocalDateTime now = LocalDateTime.now();
+
+        PayRefundRecord refundRecord = new PayRefundRecord();
+        refundRecord.setRefundNo(genRefundNo(record.getUserId()));
+        refundRecord.setPaymentId(record.getId());
+        refundRecord.setPayNo(record.getPayNo());
+        refundRecord.setThirdPayNo(record.getThirdPayNo());
+        refundRecord.setOrderId(record.getOrderId());
+        refundRecord.setOrderNo(record.getOrderNo());
+        refundRecord.setUserId(record.getUserId());
+        refundRecord.setChannel(record.getChannel());
+        refundRecord.setAmount(amount);
+        refundRecord.setStatus(1);
+        refundRecord.setReason(StrUtil.blankToDefault(reason, "后台支付退款"));
+        refundRecord.setOperatorType("admin_payment");
+        refundRecord.setCallbackData("admin-payment-refund paymentId=" + record.getId()
+                + " amount=" + amount);
+        refundRecord.setSuccessTime(now);
+        refundRecordMapper.insert(refundRecord);
 
         PayPaymentRecord update = new PayPaymentRecord();
         update.setId(id);
         update.setStatus(3);
         update.setCallbackData(appendCallback(record.getCallbackData(),
                 "admin-refund amount=" + amount
-                        + " reason=" + (dto == null ? "-" : StrUtil.blankToDefault(dto.getReason(), "-"))));
+                        + " refundNo=" + refundRecord.getRefundNo()
+                        + " reason=" + StrUtil.blankToDefault(reason, "-")));
         recordMapper.updateById(update);
 
         OmsOrder orderUpdate = new OmsOrder();
@@ -360,14 +390,38 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
                 : userMapper.selectList(Wrappers.<UmsUser>lambdaQuery().in(UmsUser::getId, userIds))
                         .stream()
                         .collect(Collectors.toMap(UmsUser::getId, item -> item, (a, b) -> a));
+        Map<Long, PayRefundRecord> refundMap = refundRecordMap(records);
 
         return records.stream()
-                .map(item -> AdminPaymentVO.from(item, orderMap.get(item.getOrderId()), userMap.get(item.getUserId())))
+                .map(item -> AdminPaymentVO.from(item, orderMap.get(item.getOrderId()), userMap.get(item.getUserId()), refundMap.get(item.getId())))
                 .collect(Collectors.toList());
+    }
+
+    private Map<Long, PayRefundRecord> refundRecordMap(List<PayPaymentRecord> records) {
+        List<Long> paymentIds = records.stream()
+                .map(PayPaymentRecord::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(paymentIds)) {
+            return Collections.emptyMap();
+        }
+        return refundRecordMapper.selectList(Wrappers.<PayRefundRecord>lambdaQuery()
+                        .in(PayRefundRecord::getPaymentId, paymentIds)
+                        .orderByDesc(PayRefundRecord::getCreateTime))
+                .stream()
+                .collect(Collectors.toMap(PayRefundRecord::getPaymentId, item -> item, (a, b) -> a));
     }
 
     private String appendCallback(String source, String text) {
         String line = "[" + LocalDateTime.now() + "] " + text;
         return StrUtil.isBlank(source) ? line : source + "\n" + line;
+    }
+
+    private String genRefundNo(Long userId) {
+        String ts = String.format("%1$tY%1$tm%1$td%1$tH%1$tM%1$tS", new Date());
+        String tail = String.format("%04d", userId == null ? 0 : userId % 10000);
+        String rnd = String.format("%04d", new Random().nextInt(10000));
+        return "RF" + ts + tail + rnd;
     }
 }

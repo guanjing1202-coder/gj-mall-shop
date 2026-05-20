@@ -46,6 +46,31 @@ export interface PaymentRecord {
   orderStatusDesc?: string
   orderPayAmount?: number
   orderPayTime?: string
+  refundRecord?: RefundRecord
+  createTime?: string
+  updateTime?: string
+}
+
+export interface RefundRecord {
+  id: ApiId
+  refundNo: string
+  paymentId: ApiId
+  payNo: string
+  thirdPayNo?: string
+  afterSaleId?: ApiId
+  afterSaleNo?: string
+  orderId: ApiId
+  orderNo: string
+  userId: ApiId
+  channel: number
+  channelDesc?: string
+  amount: number
+  status: number
+  statusDesc?: string
+  reason?: string
+  operatorType?: string
+  callbackData?: string
+  successTime?: string
   createTime?: string
   updateTime?: string
 }

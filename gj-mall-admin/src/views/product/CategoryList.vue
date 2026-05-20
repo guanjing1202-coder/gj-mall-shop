@@ -199,7 +199,7 @@ async function uploadIcon(options: any) {
     message.success('分类图标已上传')
     options.onSuccess?.(res.data)
   } catch (error) {
-    message.error('分类图标上传失败')
+    message.error((error as Error)?.message || '分类图标上传失败')
     options.onError?.(error)
   } finally {
     iconUploading.value = false

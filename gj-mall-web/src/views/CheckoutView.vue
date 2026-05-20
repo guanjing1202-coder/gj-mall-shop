@@ -12,8 +12,8 @@ import {
   type AddressItem,
   type AddressPayload,
 } from '@/api/address'
-import { getCheckoutCoupons, type MyCoupon } from '@/api/coupon'
-import { createOrder, getOrderByNo } from '@/api/order'
+import { getCheckoutCouponPlan, type CouponPlan, type MyCoupon } from '@/api/coupon'
+import { createOrder, getOrderByNo, quoteFreight, type FreightQuote } from '@/api/order'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
 import type { ApiId } from '@/api/product'
@@ -28,6 +28,7 @@ const cart = useCartStore()
 const loading = ref(false)
 const addressLoading = ref(false)
 const couponLoading = ref(false)
+const freightLoading = ref(false)
 const submitting = ref(false)
 const addressDialogOpen = ref(false)
 const addressSaving = ref(false)
@@ -56,6 +57,8 @@ const addressForm = reactive<AddressPayload>({
 })
 const addresses = ref<AddressItem[]>([])
 const coupons = ref<MyCoupon[]>([])
+const couponPlan = ref<CouponPlan>()
+const freightQuote = ref<FreightQuote>()
 
 const selectedItems = computed(() => {
   if (directBuyMode.value) {
@@ -75,13 +78,16 @@ const payableAmount = computed(() => {
   }
   return Number(cart.selectedAmount || 0)
 })
-const freightAmount = computed(() => 0)
+const freightAmount = computed(() => Number(freightQuote.value?.freightAmount || 0))
 const couponDiscount = computed(() => {
   return selectedCoupon.value ? Number(selectedCoupon.value.discountEstimate ?? calcCouponDiscount(selectedCoupon.value, payableAmount.value)) : 0
 })
 const finalAmount = computed(() => Math.max(payableAmount.value + freightAmount.value - couponDiscount.value, 0))
 const usableCouponCount = computed(() => coupons.value.filter(isCouponUsable).length)
 const unavailableCouponCount = computed(() => coupons.value.length - usableCouponCount.value)
+const bestCoupon = computed(() => couponPlan.value?.bestCoupon)
+const nextCoupon = computed(() => couponPlan.value?.nextCoupon)
+const freightSummary = computed(() => freightQuote.value?.summary || (selectedAddressId.value ? '运费计算中' : '选择地址后计算运费'))
 
 function formatPrice(value?: number) {
   return new Intl.NumberFormat('zh-CN', {
@@ -273,22 +279,40 @@ async function loadAddresses() {
 async function loadCoupons() {
   if (!auth.isLoggedIn || payableAmount.value <= 0) {
     coupons.value = []
+    couponPlan.value = undefined
     selectedCouponId.value = ''
     return
   }
   couponLoading.value = true
   try {
-    const res = await getCheckoutCoupons(payableAmount.value)
-    coupons.value = res.data || []
+    const res = await getCheckoutCouponPlan(payableAmount.value)
+    couponPlan.value = res.data
+    coupons.value = res.data?.candidates || []
     const stillAvailable = coupons.value.some((item) => String(item.couponId) === String(selectedCouponId.value) && isCouponUsable(item))
     if (!stillAvailable) {
-      const bestCoupon = coupons.value.filter(isCouponUsable).sort((a, b) => {
-        return Number(b.discountEstimate ?? calcCouponDiscount(b, payableAmount.value)) - Number(a.discountEstimate ?? calcCouponDiscount(a, payableAmount.value))
-      })[0]
-      selectedCouponId.value = bestCoupon?.couponId || ''
+      selectedCouponId.value = res.data?.bestCoupon?.couponId || ''
     }
   } finally {
     couponLoading.value = false
+  }
+}
+
+async function loadFreight() {
+  if (!auth.isLoggedIn || !selectedAddressId.value || payableAmount.value <= 0) {
+    freightQuote.value = undefined
+    return
+  }
+  freightLoading.value = true
+  try {
+    const res = await quoteFreight({
+      addressId: selectedAddressId.value,
+      orderAmount: payableAmount.value,
+    })
+    freightQuote.value = res.data
+  } catch {
+    freightQuote.value = undefined
+  } finally {
+    freightLoading.value = false
   }
 }
 
@@ -352,7 +376,7 @@ async function initialize() {
   loading.value = true
   try {
     await Promise.all([directBuyMode.value ? loadDirectBuyItem() : cart.fetchCart(), loadAddresses()])
-    await loadCoupons()
+    await Promise.all([loadCoupons(), loadFreight()])
   } finally {
     loading.value = false
   }
@@ -405,13 +429,20 @@ watch(
       initialize()
     } else {
       coupons.value = []
+      couponPlan.value = undefined
       selectedCouponId.value = ''
+      freightQuote.value = undefined
     }
   },
 )
 
 watch(payableAmount, () => {
   loadCoupons()
+  loadFreight()
+})
+
+watch(selectedAddressId, () => {
+  loadFreight()
 })
 
 watch(
@@ -541,6 +572,17 @@ onMounted(initialize)
               <strong v-if="coupons.length">{{ usableCouponCount }} 张可用 / {{ unavailableCouponCount }} 张不可用</strong>
             </div>
 
+            <div v-if="couponPlan" class="coupon-plan" :class="{ active: bestCoupon, pending: !bestCoupon && nextCoupon }">
+              <div>
+                <span>{{ bestCoupon ? '最优优惠' : nextCoupon ? '凑单提醒' : '优惠状态' }}</span>
+                <strong>{{ couponPlan.summary }}</strong>
+                <p v-if="couponPlan.nextHint">{{ couponPlan.nextHint }}</p>
+              </div>
+              <em v-if="couponPlan.discountAmount && couponPlan.discountAmount > 0">
+                -{{ formatPrice(couponPlan.discountAmount) }}
+              </em>
+            </div>
+
             <div v-loading="couponLoading" class="coupon-grid">
               <article
                 class="coupon-item no-coupon"
@@ -645,7 +687,7 @@ onMounted(initialize)
             </div>
             <div>
               <dt>运费</dt>
-              <dd>{{ formatPrice(freightAmount) }}</dd>
+              <dd v-loading="freightLoading">{{ formatPrice(freightAmount) }}</dd>
             </div>
             <div>
               <dt>优惠</dt>
@@ -659,6 +701,14 @@ onMounted(initialize)
           <div v-if="selectedCoupon" class="selected-coupon">
             <strong>{{ selectedCoupon.name }}</strong>
             <p>{{ formatCouponValue(selectedCoupon) }}，{{ formatCouponLimit(selectedCoupon) }}</p>
+          </div>
+          <div v-else-if="couponPlan?.nextHint" class="selected-coupon pending">
+            <strong>优惠提醒</strong>
+            <p>{{ couponPlan.nextHint }}</p>
+          </div>
+          <div class="selected-freight" :class="{ free: freightQuote?.freeShipping, remote: freightQuote?.remoteArea }">
+            <strong>{{ freightSummary }}</strong>
+            <p>{{ freightQuote?.hint || '选择收货地址后会自动试算运费。' }}</p>
           </div>
           <div v-if="selectedAddress" class="selected-address">
             <strong>{{ selectedAddress.receiver }} {{ selectedAddress.phone }}</strong>
@@ -991,6 +1041,61 @@ onMounted(initialize)
   min-height: 132px;
 }
 
+.coupon-plan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.coupon-plan.active {
+  border-color: rgba(229, 72, 77, 0.22);
+  background: #fff7f7;
+}
+
+.coupon-plan.pending {
+  border-color: rgba(47, 143, 103, 0.22);
+  background: #f4fbf7;
+}
+
+.coupon-plan span,
+.coupon-plan strong,
+.coupon-plan p {
+  display: block;
+}
+
+.coupon-plan span {
+  color: #e5484d;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.coupon-plan strong {
+  margin-top: 6px;
+  color: #111827;
+  line-height: 1.45;
+}
+
+.coupon-plan p {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.coupon-plan em {
+  flex: 0 0 auto;
+  color: #e5484d;
+  font-size: 20px;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .order-item {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr) 48px 110px;
@@ -1080,6 +1185,7 @@ onMounted(initialize)
 
 .selected-address,
 .selected-coupon,
+.selected-freight,
 .selected-invoice {
   margin-top: 18px;
   padding: 14px;
@@ -1091,6 +1197,22 @@ onMounted(initialize)
   background: #fff7ed;
 }
 
+.selected-coupon.pending {
+  background: #f4fbf7;
+}
+
+.selected-freight {
+  background: #eef6ff;
+}
+
+.selected-freight.free {
+  background: #f4fbf7;
+}
+
+.selected-freight.remote {
+  background: #fff7ed;
+}
+
 .selected-invoice {
   background: #eef8f2;
 }
@@ -1099,6 +1221,8 @@ onMounted(initialize)
 .selected-address p,
 .selected-coupon strong,
 .selected-coupon p,
+.selected-freight strong,
+.selected-freight p,
 .selected-invoice strong,
 .selected-invoice p {
   display: block;
@@ -1107,6 +1231,7 @@ onMounted(initialize)
 
 .selected-address p,
 .selected-coupon p,
+.selected-freight p,
 .selected-invoice p {
   margin-top: 8px;
   color: #6b7280;

@@ -13,6 +13,7 @@ import com.gj.mall.marketing.mapper.SmsCouponUserMapper;
 import com.gj.mall.marketing.service.CouponService;
 import com.gj.mall.marketing.vo.CouponCheckResult;
 import com.gj.mall.marketing.vo.CouponCenterVO;
+import com.gj.mall.marketing.vo.CouponPlanVO;
 import com.gj.mall.marketing.vo.CouponVO;
 import com.gj.mall.marketing.vo.MyCouponVO;
 import lombok.RequiredArgsConstructor;
@@ -126,6 +127,58 @@ public class CouponServiceImpl implements CouponService {
                     return safeMoney(a.getAmountGap()).compareTo(safeMoney(b.getAmountGap()));
                 })
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public CouponPlanVO checkoutPlan(Long userId, BigDecimal orderAmount) {
+        BigDecimal amount = orderAmount == null ? BigDecimal.ZERO : orderAmount.max(BigDecimal.ZERO);
+        List<MyCouponVO> candidates = checkoutList(userId, amount);
+        MyCouponVO bestCoupon = candidates.stream()
+                .filter(item -> Boolean.TRUE.equals(item.getUsable()))
+                .findFirst()
+                .orElse(null);
+        MyCouponVO nextCoupon = candidates.stream()
+                .filter(item -> !Boolean.TRUE.equals(item.getUsable()))
+                .filter(item -> safeMoney(item.getAmountGap()).compareTo(BigDecimal.ZERO) > 0)
+                .sorted((a, b) -> {
+                    int gapCompare = safeMoney(a.getAmountGap()).compareTo(safeMoney(b.getAmountGap()));
+                    if (gapCompare != 0) return gapCompare;
+                    return safeMoney(b.getDiscountEstimate()).compareTo(safeMoney(a.getDiscountEstimate()));
+                })
+                .findFirst()
+                .orElse(null);
+        BigDecimal discount = bestCoupon == null ? BigDecimal.ZERO : safeMoney(bestCoupon.getDiscountEstimate());
+        BigDecimal payable = amount.subtract(discount);
+        if (payable.signum() < 0) {
+            payable = BigDecimal.ZERO;
+        }
+
+        CouponPlanVO plan = new CouponPlanVO();
+        plan.setOrderAmount(amount.setScale(2, RoundingMode.HALF_UP));
+        plan.setDiscountAmount(discount.setScale(2, RoundingMode.HALF_UP));
+        plan.setPayableAmount(payable.setScale(2, RoundingMode.HALF_UP));
+        plan.setUsableCount((int) candidates.stream().filter(item -> Boolean.TRUE.equals(item.getUsable())).count());
+        plan.setUnavailableCount(candidates.size() - plan.getUsableCount());
+        plan.setBestCoupon(bestCoupon);
+        plan.setNextCoupon(nextCoupon);
+        plan.setNextAmountGap(nextCoupon == null ? BigDecimal.ZERO : safeMoney(nextCoupon.getAmountGap()).setScale(2, RoundingMode.HALF_UP));
+        plan.setCandidates(candidates);
+        if (bestCoupon != null) {
+            plan.setSummary("已匹配最优优惠：" + bestCoupon.getName() + "，预计省 " + formatMoney(discount) + " 元");
+            if (nextCoupon != null) {
+                plan.setNextHint("再凑 " + formatMoney(safeMoney(nextCoupon.getAmountGap())) + " 元可尝试使用 " + nextCoupon.getName());
+            }
+        } else if (nextCoupon != null) {
+            plan.setSummary("当前暂无可用券");
+            plan.setNextHint("再凑 " + formatMoney(safeMoney(nextCoupon.getAmountGap())) + " 元可用 " + nextCoupon.getName());
+        } else if (candidates.isEmpty()) {
+            plan.setSummary("当前账户暂无优惠券");
+            plan.setNextHint("可以先去领券中心看看");
+        } else {
+            plan.setSummary("暂无适合当前订单的优惠券");
+            plan.setNextHint("已使用、过期或未启用的券不会参与本次结算");
+        }
+        return plan;
     }
 
     @Override
@@ -354,6 +407,10 @@ public class CouponServiceImpl implements CouponService {
 
     private BigDecimal safeMoney(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private String formatMoney(BigDecimal value) {
+        return safeMoney(value).setScale(2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
     }
 
     private String typeDesc(Integer type) {

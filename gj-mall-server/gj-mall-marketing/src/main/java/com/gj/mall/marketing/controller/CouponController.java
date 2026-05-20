@@ -5,6 +5,7 @@ import com.gj.mall.framework.context.UserContext;
 import com.gj.mall.framework.security.AuthExclude;
 import com.gj.mall.marketing.service.CouponService;
 import com.gj.mall.marketing.vo.CouponCenterVO;
+import com.gj.mall.marketing.vo.CouponPlanVO;
 import com.gj.mall.marketing.vo.MyCouponVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -54,5 +55,12 @@ public class CouponController {
     public Result<List<MyCouponVO>> checkout(
             @RequestParam(required = false) BigDecimal orderAmount) {
         return Result.success(couponService.checkoutList(UserContext.getUserId(), orderAmount));
+    }
+
+    @Operation(summary = "结算页优惠方案（最优优惠 + 凑单提示 + 候选券）")
+    @GetMapping("/checkout-plan")
+    public Result<CouponPlanVO> checkoutPlan(
+            @RequestParam(required = false) BigDecimal orderAmount) {
+        return Result.success(couponService.checkoutPlan(UserContext.getUserId(), orderAmount));
     }
 }

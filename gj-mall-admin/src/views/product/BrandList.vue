@@ -195,7 +195,7 @@ async function uploadLogo(options: any) {
     message.success('Logo 已上传')
     options.onSuccess?.(res.data)
   } catch (error) {
-    message.error('Logo 上传失败')
+    message.error((error as Error)?.message || 'Logo 上传失败')
     options.onError?.(error)
   } finally {
     logoUploading.value = false

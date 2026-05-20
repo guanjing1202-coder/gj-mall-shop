@@ -400,6 +400,19 @@ function canRefund(record: PaymentRecord) {
   return record.status === 1 && record.orderStatus !== 6
 }
 
+function refundOperatorText(value?: string) {
+  if (value === 'admin_after_sale') {
+    return '售后后台'
+  }
+  if (value === 'admin_payment') {
+    return '支付后台'
+  }
+  if (value === 'system') {
+    return '系统'
+  }
+  return value || '--'
+}
+
 function toPayment(record: Record<string, any>) {
   return record as PaymentRecord
 }
@@ -676,6 +689,30 @@ function signatureStatusColor(status?: number) {
         </div>
 
         <div style="margin-top: 20px">
+          <h4 style="margin-bottom: 12px">退款记录</h4>
+          <div v-if="currentPayment.refundRecord" class="refund-record-card">
+            <div class="refund-record-card__main">
+              <span>退款流水</span>
+              <strong>{{ currentPayment.refundRecord.refundNo }}</strong>
+              <small>
+                {{ currentPayment.refundRecord.channelDesc || '--' }} ·
+                {{ refundOperatorText(currentPayment.refundRecord.operatorType) }} ·
+                {{ currentPayment.refundRecord.successTime || currentPayment.refundRecord.createTime || '--' }}
+              </small>
+            </div>
+            <div class="refund-record-card__amount">
+              <span>{{ currentPayment.refundRecord.statusDesc || '--' }}</span>
+              <strong>{{ formatMoney(currentPayment.refundRecord.amount) }}</strong>
+            </div>
+            <div class="refund-record-card__meta">
+              <span v-if="currentPayment.refundRecord.afterSaleNo">售后单：{{ currentPayment.refundRecord.afterSaleNo }}</span>
+              <span>退款原因：{{ currentPayment.refundRecord.reason || '--' }}</span>
+            </div>
+          </div>
+          <a-empty v-else :image="false" description="暂无退款记录" />
+        </div>
+
+        <div style="margin-top: 20px">
           <h4 style="margin-bottom: 12px">最近渠道回调</h4>
           <a-spin :spinning="callbackLoading">
             <a-empty v-if="!callbacks.length" :image="false" description="暂无回调记录" />
@@ -845,6 +882,57 @@ function signatureStatusColor(status?: number) {
 .callback-line p {
   margin: 8px 0;
   color: #475569;
+}
+
+.refund-record-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 12px 18px;
+  padding: 16px 18px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.refund-record-card__main span,
+.refund-record-card__main small,
+.refund-record-card__amount span,
+.refund-record-card__meta span {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.refund-record-card__main strong {
+  display: block;
+  margin: 6px 0;
+  color: #111827;
+  font-size: 18px;
+  word-break: break-all;
+}
+
+.refund-record-card__amount {
+  text-align: right;
+}
+
+.refund-record-card__amount span {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.refund-record-card__amount strong {
+  display: block;
+  margin-top: 6px;
+  color: #dc2626;
+  font-size: 22px;
+}
+
+.refund-record-card__meta {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f5;
 }
 
 .summary-card {

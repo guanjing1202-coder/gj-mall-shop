@@ -9,6 +9,7 @@ import {
   cancelAfterSale,
   cancelOrder,
   createAfterSale,
+  getAfterSaleEligibility,
   createOrderComment,
   getOrderAfterSales,
   getOrderComments,
@@ -16,6 +17,7 @@ import {
   getOrderLogistics,
   receiveOrder,
   submitAfterSaleReturn,
+  type AfterSaleEligibility,
   type AfterSale,
   type OrderComment,
   type OrderDetail,
@@ -37,6 +39,7 @@ const order = ref<OrderDetail>()
 const logistics = ref<OrderLogistics>()
 const comments = ref<OrderComment[]>([])
 const afterSales = ref<AfterSale[]>([])
+const afterSaleEligibility = ref<AfterSaleEligibility>()
 const payChannel = ref<PayChannel>('mock')
 const previewImages = ref<string[]>([])
 const previewIndex = ref(0)
@@ -80,7 +83,16 @@ const hasActiveAfterSale = computed(() => {
 })
 const canApplyAfterSale = computed(() => {
   const status = Number(order.value?.status)
-  return [1, 2, 3].includes(status) && !hasActiveAfterSale.value
+  return [1, 2, 3].includes(status) && !hasActiveAfterSale.value && afterSaleEligibility.value?.available !== false
+})
+const afterSaleUnavailableReason = computed(() => {
+  if (hasActiveAfterSale.value) {
+    return '当前订单已有处理中售后单。'
+  }
+  if (afterSaleEligibility.value?.available === false) {
+    return afterSaleEligibility.value.unavailableReason || '当前订单暂不能申请售后。'
+  }
+  return ''
 })
 const commentMap = computed(() => {
   const map = new Map<string, OrderComment>()
@@ -195,6 +207,7 @@ async function uploadFormImage(kind: ImageFormKind, options: UploadRequestOption
     ElMessage.success('图片已上传')
     options.onSuccess(res.data)
   } catch (error) {
+    ElMessage.error((error as Error)?.message || '图片上传失败')
     options.onError(error as any)
   } finally {
     imageUploading.value = ''
@@ -290,10 +303,20 @@ async function loadOrder() {
       comments.value = commentRes.data || []
       afterSales.value = afterSaleRes.data || []
       logistics.value = logisticsRes.data
+      await loadAfterSaleEligibility(res.data.id)
     }
     await cart.fetchCart()
   } finally {
     loading.value = false
+  }
+}
+
+async function loadAfterSaleEligibility(orderId: string | number) {
+  try {
+    const res = await getAfterSaleEligibility(orderId)
+    afterSaleEligibility.value = res.data
+  } catch {
+    afterSaleEligibility.value = undefined
   }
 }
 
@@ -338,8 +361,15 @@ async function submitComment() {
 }
 
 function openAfterSale() {
+  if (!order.value) {
+    return
+  }
+  if (afterSaleEligibility.value?.available === false) {
+    ElMessage.warning(afterSaleEligibility.value.unavailableReason || '当前订单暂不能申请售后')
+    return
+  }
   afterSaleForm.value = {
-    type: Number(order.value?.status) === 1 ? 1 : 2,
+    type: Number(order.value.status) === 1 || afterSaleEligibility.value?.returnRefundAllowed === false ? 1 : 2,
     reason: '',
     description: '',
     imageInput: '',
@@ -779,7 +809,7 @@ onMounted(loadOrder)
 
             <div v-else class="after-sale-empty">
               <strong>暂无售后记录</strong>
-              <span>已付款、待收货或已完成订单可以在这里申请售后。</span>
+              <span>{{ afterSaleUnavailableReason || '已付款、待收货或已完成订单可以在这里申请售后。' }}</span>
             </div>
           </section>
         </div>
@@ -926,7 +956,7 @@ onMounted(loadOrder)
             v-model="afterSaleForm.type"
             :options="[
               { label: '仅退款', value: 1 },
-              { label: '退货退款', value: 2 },
+              { label: '退货退款', value: 2, disabled: afterSaleEligibility?.returnRefundAllowed === false },
             ]"
           />
         </el-form-item>
@@ -983,7 +1013,7 @@ onMounted(loadOrder)
     <el-dialog v-model="returnDialogOpen" title="填写退货物流" width="480px" class="service-dialog" append-to-body>
       <div v-if="returnTarget" class="service-summary">
         <strong>{{ returnTarget.afterSaleNo }}</strong>
-        <span>提交后售后单将进入待退款状态。</span>
+        <span>提交后商家会先确认退货收货，再进入退款处理。</span>
       </div>
 
       <el-form label-position="top" @submit.prevent>
