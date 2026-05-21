@@ -35,7 +35,7 @@ public class UserMessageVO {
         return vo;
     }
 
-    private static String typeDesc(String type) {
+    public static String typeDesc(String type) {
         if ("order".equals(type)) return "订单通知";
         if ("logistics".equals(type)) return "物流通知";
         if ("after_sale".equals(type)) return "售后通知";

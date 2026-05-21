@@ -4,9 +4,24 @@
       <view>
         <text class="kicker">Notification</text>
         <text class="title">消息中心</text>
-        <text class="subtitle">订单、支付、物流和售后状态会同步到这里。</text>
+        <text class="subtitle">{{ currentFilterText }} · {{ selectedTypeLabel }}</text>
       </view>
       <button v-if="isLoggedIn" :disabled="!unreadTotal" @tap="readAll">{{ unreadTotal ? '全部已读' : '无未读' }}</button>
+    </view>
+
+    <view v-if="isLoggedIn" class="summary-grid">
+      <view class="summary-cell" @tap="switchFilter(undefined)">
+        <text>全部</text>
+        <strong>{{ summary.total }}</strong>
+      </view>
+      <view class="summary-cell danger" @tap="switchFilter(0)">
+        <text>未读</text>
+        <strong>{{ summary.unreadTotal }}</strong>
+      </view>
+      <view class="summary-cell" @tap="switchFilter(1)">
+        <text>已读</text>
+        <strong>{{ summary.readTotal }}</strong>
+      </view>
     </view>
 
     <scroll-view scroll-x class="tabs">
@@ -19,6 +34,22 @@
           @tap="switchFilter(item.value)"
         >
           {{ item.label }}
+        </view>
+      </view>
+    </scroll-view>
+
+    <scroll-view v-if="isLoggedIn" scroll-x class="type-tabs">
+      <view class="type-row">
+        <view
+          v-for="item in typeFilters"
+          :key="item.type || 'all'"
+          class="type-tab"
+          :class="{ active: selectedType === item.type }"
+          @tap="switchType(item.type)"
+        >
+          <text>{{ item.typeDesc }}</text>
+          <strong>{{ item.total }}</strong>
+          <em v-if="item.unreadTotal">{{ item.unreadTotal }} 未读</em>
         </view>
       </view>
     </scroll-view>
@@ -72,8 +103,10 @@ import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import {
   deleteMessage,
   getMessagePage,
+  getMessageSummary,
   markAllMessagesRead,
   markMessageRead,
+  type MessageSummary,
   type UserMessage,
 } from '@/api/message'
 import { syncSession } from '@/utils/session'
@@ -91,8 +124,33 @@ const pageNum = ref(1)
 const total = ref(0)
 const finished = ref(false)
 const readStatus = ref<number | undefined>()
+const selectedType = ref<string | undefined>()
+const summary = ref<MessageSummary>({
+  total: 0,
+  unreadTotal: 0,
+  readTotal: 0,
+  typeItems: [],
+})
 
-const unreadTotal = computed(() => messages.value.filter((item) => Number(item.readStatus) === 0).length)
+const unreadTotal = computed(() => Number(summary.value.unreadTotal || 0))
+const typeFilters = computed(() => [
+  {
+    type: undefined,
+    typeDesc: '全部',
+    total: Number(summary.value.total || 0),
+    unreadTotal: Number(summary.value.unreadTotal || 0),
+  },
+  ...(summary.value.typeItems || []),
+])
+const currentFilterText = computed(() => {
+  if (readStatus.value === 0) return '未读消息'
+  if (readStatus.value === 1) return '已读消息'
+  return '全部消息'
+})
+const selectedTypeLabel = computed(() => {
+  if (!selectedType.value) return '全部类型'
+  return typeFilters.value.find((item) => item.type === selectedType.value)?.typeDesc || '全部类型'
+})
 
 onShow(async () => {
   isLoggedIn.value = await syncSession()
@@ -123,11 +181,15 @@ async function refresh() {
 async function loadMessages(reset: boolean) {
   loading.value = true
   try {
-    const res = await getMessagePage({ current: pageNum.value, size: 10, readStatus: readStatus.value })
+    const [res, summaryRes] = await Promise.all([
+      getMessagePage({ current: pageNum.value, size: 10, readStatus: readStatus.value, type: selectedType.value }),
+      getMessageSummary(),
+    ])
     const page = res.data
     const list = page?.list || []
     messages.value = reset ? list : [...messages.value, ...list]
     total.value = Number(page?.total || 0)
+    summary.value = summaryRes.data || summary.value
     finished.value = messages.value.length >= total.value || !list.length
     pageNum.value += 1
   } finally {
@@ -137,6 +199,11 @@ async function loadMessages(reset: boolean) {
 
 async function switchFilter(value?: number) {
   readStatus.value = value
+  await refresh()
+}
+
+async function switchType(type?: string) {
+  selectedType.value = type
   await refresh()
 }
 
@@ -151,6 +218,7 @@ async function openMessage(item: UserMessage) {
   if (Number(item.readStatus) === 0) {
     await markMessageRead(item.id)
     item.readStatus = 1
+    await refresh()
   }
   if (item.bizType === 'order' && item.bizId) {
     uni.navigateTo({ url: `/pages/order/detail?id=${item.bizId}` })
@@ -164,6 +232,7 @@ async function removeMessage(item: UserMessage) {
   messages.value = messages.value.filter((message) => String(message.id) !== String(item.id))
   total.value = Math.max(0, total.value - 1)
   uni.showToast({ title: '消息已删除', icon: 'success' })
+  await refresh()
 }
 
 function goLogin() {
@@ -189,6 +258,8 @@ function formatTime(value?: string) {
 }
 
 .hero,
+.summary-grid,
+.type-tabs,
 .message-card,
 .empty-card {
   border-radius: 16rpx;
@@ -246,13 +317,46 @@ function formatTime(value?: string) {
   line-height: 60rpx;
 }
 
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rpx;
+  margin-top: 18rpx;
+  overflow: hidden;
+}
+
+.summary-cell {
+  padding: 22rpx 24rpx;
+  background: #fff;
+}
+
+.summary-cell text {
+  display: block;
+  color: #6b7280;
+  font-size: 22rpx;
+  font-weight: 900;
+}
+
+.summary-cell strong {
+  display: block;
+  margin-top: 8rpx;
+  color: #111827;
+  font-size: 40rpx;
+  line-height: 1;
+}
+
+.summary-cell.danger strong {
+  color: #e5484d;
+}
+
 .tabs {
   width: 100%;
-  margin: 22rpx 0;
+  margin: 18rpx 0 14rpx;
   white-space: nowrap;
 }
 
-.tab-row {
+.tab-row,
+.type-row {
   display: flex;
   gap: 12rpx;
 }
@@ -272,6 +376,48 @@ function formatTime(value?: string) {
 .tab.active {
   background: #e5484d;
   color: #fff;
+}
+
+.type-tabs {
+  width: 100%;
+  margin-bottom: 22rpx;
+  padding: 12rpx;
+  white-space: nowrap;
+}
+
+.type-tab {
+  display: inline-flex;
+  min-width: 176rpx;
+  flex-direction: column;
+  gap: 6rpx;
+  padding: 18rpx 20rpx;
+  border: 2rpx solid transparent;
+  border-radius: 14rpx;
+  background: #f7f8f5;
+}
+
+.type-tab.active {
+  border-color: rgba(229, 72, 77, 0.32);
+  background: #fff8f8;
+}
+
+.type-tab text {
+  color: #6b7280;
+  font-size: 21rpx;
+  font-weight: 900;
+}
+
+.type-tab strong {
+  color: #111827;
+  font-size: 31rpx;
+  line-height: 1;
+}
+
+.type-tab em {
+  color: #e5484d;
+  font-size: 20rpx;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .list {

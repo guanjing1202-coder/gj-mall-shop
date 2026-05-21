@@ -1,6 +1,7 @@
 package com.gj.mall.user.service.impl;
 
 import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -10,12 +11,16 @@ import com.gj.mall.common.result.PageResult;
 import com.gj.mall.user.entity.UmsUserMessage;
 import com.gj.mall.user.mapper.UmsUserMessageMapper;
 import com.gj.mall.user.service.UserMessageService;
+import com.gj.mall.user.vo.UserMessageSummaryVO;
 import com.gj.mall.user.vo.UserMessageVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,7 +30,7 @@ public class UserMessageServiceImpl implements UserMessageService {
     private final UmsUserMessageMapper messageMapper;
 
     @Override
-    public PageResult<UserMessageVO> page(Long userId, Long current, Long size, Integer readStatus) {
+    public PageResult<UserMessageVO> page(Long userId, Long current, Long size, Integer readStatus, String type) {
         long pageNum = normalizePageNum(current);
         long pageSize = normalizePageSize(size);
         IPage<UmsUserMessage> result = messageMapper.selectPage(
@@ -33,6 +38,7 @@ public class UserMessageServiceImpl implements UserMessageService {
                 Wrappers.<UmsUserMessage>lambdaQuery()
                         .eq(UmsUserMessage::getUserId, userId)
                         .eq(readStatus != null, UmsUserMessage::getReadStatus, readStatus)
+                        .eq(StrUtil.isNotBlank(type), UmsUserMessage::getType, normalizeType(type))
                         .orderByAsc(UmsUserMessage::getReadStatus)
                         .orderByDesc(UmsUserMessage::getCreateTime));
         if (result.getRecords() == null || result.getRecords().isEmpty()) {
@@ -50,6 +56,39 @@ public class UserMessageServiceImpl implements UserMessageService {
         return messageMapper.selectCount(Wrappers.<UmsUserMessage>lambdaQuery()
                 .eq(UmsUserMessage::getUserId, userId)
                 .eq(UmsUserMessage::getReadStatus, 0));
+    }
+
+    @Override
+    public UserMessageSummaryVO summary(Long userId) {
+        List<UmsUserMessage> messages = messageMapper.selectList(new QueryWrapper<UmsUserMessage>()
+                .select("type", "read_status")
+                .eq("user_id", userId)
+                .eq("deleted", 0));
+
+        Map<String, UserMessageSummaryVO.TypeItem> typeMap = defaultTypeMap();
+        long total = 0L;
+        long unreadTotal = 0L;
+        for (UmsUserMessage message : messages) {
+            total++;
+            String type = normalizeType(message.getType());
+            UserMessageSummaryVO.TypeItem item = typeMap.computeIfAbsent(
+                    type,
+                    key -> UserMessageSummaryVO.TypeItem.empty(key, UserMessageVO.typeDesc(key)));
+            item.setTotal(item.getTotal() + 1);
+            if (Integer.valueOf(0).equals(message.getReadStatus())) {
+                unreadTotal++;
+                item.setUnreadTotal(item.getUnreadTotal() + 1);
+            } else {
+                item.setReadTotal(item.getReadTotal() + 1);
+            }
+        }
+
+        UserMessageSummaryVO summary = new UserMessageSummaryVO();
+        summary.setTotal(total);
+        summary.setUnreadTotal(unreadTotal);
+        summary.setReadTotal(Math.max(0L, total - unreadTotal));
+        summary.setTypeItems(typeMap.values().stream().collect(Collectors.toList()));
+        return summary;
     }
 
     @Override
@@ -118,5 +157,23 @@ public class UserMessageServiceImpl implements UserMessageService {
             return 10;
         }
         return Math.min(pageSize, 50);
+    }
+
+    private Map<String, UserMessageSummaryVO.TypeItem> defaultTypeMap() {
+        Map<String, UserMessageSummaryVO.TypeItem> map = new LinkedHashMap<>();
+        addType(map, "order");
+        addType(map, "logistics");
+        addType(map, "payment");
+        addType(map, "after_sale");
+        addType(map, "system");
+        return map;
+    }
+
+    private void addType(Map<String, UserMessageSummaryVO.TypeItem> map, String type) {
+        map.put(type, UserMessageSummaryVO.TypeItem.empty(type, UserMessageVO.typeDesc(type)));
+    }
+
+    private String normalizeType(String type) {
+        return StrUtil.blankToDefault(type, "system");
     }
 }

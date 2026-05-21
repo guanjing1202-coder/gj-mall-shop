@@ -4,6 +4,7 @@ import com.gj.mall.common.result.PageResult;
 import com.gj.mall.common.result.Result;
 import com.gj.mall.framework.context.UserContext;
 import com.gj.mall.user.service.UserMessageService;
+import com.gj.mall.user.vo.UserMessageSummaryVO;
 import com.gj.mall.user.vo.UserMessageVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -29,14 +30,21 @@ public class MessageController {
     public Result<PageResult<UserMessageVO>> page(
             @RequestParam(required = false) Long current,
             @RequestParam(required = false) Long size,
-            @RequestParam(required = false) Integer readStatus) {
-        return Result.success(messageService.page(UserContext.getUserId(), current, size, readStatus));
+            @RequestParam(required = false) Integer readStatus,
+            @RequestParam(required = false) String type) {
+        return Result.success(messageService.page(UserContext.getUserId(), current, size, readStatus, type));
     }
 
     @Operation(summary = "未读消息数")
     @GetMapping("/unread-count")
     public Result<Long> unreadCount() {
         return Result.success(messageService.unreadCount(UserContext.getUserId()));
+    }
+
+    @Operation(summary = "消息汇总")
+    @GetMapping("/summary")
+    public Result<UserMessageSummaryVO> summary() {
+        return Result.success(messageService.summary(UserContext.getUserId()));
     }
 
     @Operation(summary = "标记单条消息已读")

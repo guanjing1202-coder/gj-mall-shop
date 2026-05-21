@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import ShopHeader from '@/components/ShopHeader.vue'
 import {
   deleteMessage,
   getMessagePage,
+  getMessageSummary,
   markAllMessagesRead,
   markMessageRead,
+  type MessageSummary,
   type UserMessage,
 } from '@/api/message'
 import { useAuthStore } from '@/stores/auth'
@@ -20,10 +22,44 @@ const total = ref(0)
 const current = ref(1)
 const pageSize = ref(10)
 const readStatus = ref<number | undefined>()
+const selectedType = ref<string | undefined>()
+const summary = ref<MessageSummary>({
+  total: 0,
+  unreadTotal: 0,
+  readTotal: 0,
+  typeItems: [],
+})
 
-const unreadTotal = computed(() => messages.value.filter((item) => Number(item.readStatus) === 0).length)
+const unreadTotal = computed(() => Number(summary.value.unreadTotal || 0))
+const typeFilters = computed(() => [
+  {
+    type: undefined,
+    typeDesc: '全部',
+    total: Number(summary.value.total || 0),
+    unreadTotal: Number(summary.value.unreadTotal || 0),
+  },
+  ...(summary.value.typeItems || []),
+])
 
 onMounted(loadMessages)
+
+watch(
+  () => auth.isLoggedIn,
+  (loggedIn) => {
+    if (loggedIn) {
+      loadMessages()
+      return
+    }
+    messages.value = []
+    total.value = 0
+    summary.value = {
+      total: 0,
+      unreadTotal: 0,
+      readTotal: 0,
+      typeItems: [],
+    }
+  },
+)
 
 async function loadMessages() {
   if (!auth.isLoggedIn) {
@@ -32,9 +68,19 @@ async function loadMessages() {
   }
   loading.value = true
   try {
-    const res = await getMessagePage({ current: current.value, size: pageSize.value, readStatus: readStatus.value })
+    const [pageRes, summaryRes] = await Promise.all([
+      getMessagePage({
+        current: current.value,
+        size: pageSize.value,
+        readStatus: readStatus.value,
+        type: selectedType.value,
+      }),
+      getMessageSummary(),
+    ])
+    const res = pageRes
     messages.value = res.data?.list || []
     total.value = Number(res.data?.total || 0)
+    summary.value = summaryRes.data || summary.value
   } finally {
     loading.value = false
   }
@@ -44,6 +90,7 @@ async function readMessage(item: UserMessage) {
   if (Number(item.readStatus) === 0) {
     await markMessageRead(item.id)
     item.readStatus = 1
+    await loadMessages()
   }
   openBiz(item)
 }
@@ -74,6 +121,12 @@ function switchFilter(value?: number) {
   loadMessages()
 }
 
+function switchType(type?: string) {
+  selectedType.value = type
+  current.value = 1
+  loadMessages()
+}
+
 function onPageChange(page: number) {
   current.value = page
   loadMessages()
@@ -82,6 +135,12 @@ function onPageChange(page: number) {
 function formatTime(value?: string) {
   if (!value) return '--'
   return value.replace('T', ' ').slice(0, 16)
+}
+
+function currentFilterText() {
+  if (readStatus.value === 0) return '未读消息'
+  if (readStatus.value === 1) return '已读消息'
+  return '全部消息'
 }
 </script>
 
@@ -94,7 +153,7 @@ function formatTime(value?: string) {
         <div>
           <span>Notification</span>
           <h1>消息中心</h1>
-          <p>订单、支付、物流和售后状态都会在这里同步。</p>
+          <p>{{ currentFilterText() }} · {{ selectedType ? typeFilters.find((item) => item.type === selectedType)?.typeDesc : '全部类型' }}</p>
         </div>
         <div class="hero-actions">
           <el-button @click="switchFilter(undefined)">全部</el-button>
@@ -102,6 +161,35 @@ function formatTime(value?: string) {
           <el-button @click="switchFilter(1)">已读</el-button>
           <el-button type="primary" :disabled="!unreadTotal" @click="readAll">全部已读</el-button>
         </div>
+      </section>
+
+      <section class="message-stats" aria-label="消息统计">
+        <button type="button" class="stat-cell" @click="switchFilter(undefined)">
+          <span>全部消息</span>
+          <strong>{{ summary.total }}</strong>
+        </button>
+        <button type="button" class="stat-cell danger" @click="switchFilter(0)">
+          <span>未读</span>
+          <strong>{{ summary.unreadTotal }}</strong>
+        </button>
+        <button type="button" class="stat-cell" @click="switchFilter(1)">
+          <span>已读</span>
+          <strong>{{ summary.readTotal }}</strong>
+        </button>
+      </section>
+
+      <section class="type-strip" aria-label="消息类型">
+        <button
+          v-for="item in typeFilters"
+          :key="item.type || 'all'"
+          type="button"
+          :class="{ active: selectedType === item.type }"
+          @click="switchType(item.type)"
+        >
+          <span>{{ item.typeDesc }}</span>
+          <strong>{{ item.total }}</strong>
+          <em v-if="item.unreadTotal">{{ item.unreadTotal }} 未读</em>
+        </button>
       </section>
 
       <section v-loading="loading" class="message-panel">
@@ -156,6 +244,8 @@ function formatTime(value?: string) {
 }
 
 .message-hero,
+.message-stats,
+.type-strip,
 .message-panel {
   border: 1px solid rgba(17, 24, 39, 0.06);
   border-radius: 18px;
@@ -199,6 +289,115 @@ function formatTime(value?: string) {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.message-stats {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 1px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  padding: 0;
+}
+
+.stat-cell {
+  min-width: 0;
+  padding: 18px 22px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.stat-cell + .stat-cell {
+  border-left: 1px solid rgba(17, 24, 39, 0.06);
+}
+
+.stat-cell:hover {
+  background: #fbfcf8;
+}
+
+.stat-cell:active {
+  transform: translateY(1px);
+}
+
+.stat-cell span {
+  display: block;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.stat-cell strong {
+  display: block;
+  margin-top: 8px;
+  color: #111827;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.stat-cell.danger strong {
+  color: #e5484d;
+}
+
+.type-strip {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 10px;
+  overflow-x: auto;
+}
+
+.type-strip button {
+  flex: 0 0 auto;
+  min-width: 132px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: #fbfcf8;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.type-strip button.active {
+  border-color: rgba(229, 72, 77, 0.32);
+  background: #fff8f8;
+}
+
+.type-strip button:active {
+  transform: translateY(1px);
+}
+
+.type-strip span,
+.type-strip em {
+  display: block;
+}
+
+.type-strip span {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.type-strip strong {
+  display: block;
+  margin-top: 6px;
+  color: #111827;
+  font-size: 20px;
+}
+
+.type-strip em {
+  margin-top: 4px;
+  color: #e5484d;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
 }
 
 .message-panel {
@@ -279,6 +478,15 @@ function formatTime(value?: string) {
 
   .message-card {
     grid-template-columns: 1fr;
+  }
+
+  .message-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-cell + .stat-cell {
+    border-top: 1px solid rgba(17, 24, 39, 0.06);
+    border-left: 0;
   }
 
   .message-hero {

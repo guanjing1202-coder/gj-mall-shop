@@ -15,10 +15,26 @@ export interface UserMessage {
   createTime?: string
 }
 
+export interface MessageTypeSummary {
+  type: string
+  typeDesc: string
+  total: number
+  unreadTotal: number
+  readTotal: number
+}
+
+export interface MessageSummary {
+  total: number
+  unreadTotal: number
+  readTotal: number
+  typeItems: MessageTypeSummary[]
+}
+
 export interface MessageQuery {
   current?: number
   size?: number
   readStatus?: number
+  type?: string
 }
 
 export function getMessagePage(params: MessageQuery) {
@@ -27,6 +43,10 @@ export function getMessagePage(params: MessageQuery) {
 
 export function getUnreadMessageCount() {
   return request.get<ApiResult<number>>('/api/user/message/unread-count')
+}
+
+export function getMessageSummary() {
+  return request.get<ApiResult<MessageSummary>>('/api/user/message/summary')
 }
 
 export function markMessageRead(id: ApiId) {
