@@ -5,6 +5,7 @@
 html,
 body,
 #app {
+  width: 100%;
   min-height: 100%;
   margin: 0;
   padding: 0;
@@ -28,10 +29,29 @@ select {
 
 img {
   max-width: 100%;
+  height: auto;
 }
 
 a {
   color: inherit;
+}
+
+#app {
+  overflow-x: clip;
+}
+
+@media (max-width: 760px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    min-width: 0;
+  }
+
+  .el-dialog {
+    max-width: calc(100vw - 24px);
+  }
 }
 
 ::selection {

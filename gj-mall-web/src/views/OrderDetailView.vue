@@ -1042,12 +1042,15 @@ onMounted(loadOrder)
 
 <style scoped>
 .order-detail-page {
+  width: 100%;
+  overflow-x: clip;
   min-height: 100vh;
   background: #f7f8f5;
   color: #111827;
 }
 
 .order-shell {
+  width: 100%;
   max-width: 1240px;
   margin: 0 auto;
   padding: 36px 24px 72px;
@@ -1132,15 +1135,18 @@ onMounted(loadOrder)
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 24px;
   align-items: start;
+  width: 100%;
   min-height: 420px;
 }
 
 .detail-main {
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 
 .detail-block {
+  min-width: 0;
   padding: 24px;
 }
 
@@ -1208,6 +1214,10 @@ onMounted(loadOrder)
   font-weight: 900;
 }
 
+.status-block :deep(.el-steps) {
+  min-width: 0;
+}
+
 .order-item {
   display: grid;
   grid-template-columns: 78px minmax(0, 1fr) 50px 116px;
@@ -1238,6 +1248,7 @@ onMounted(loadOrder)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  word-break: break-word;
 }
 
 .item-copy span {
@@ -1530,6 +1541,7 @@ onMounted(loadOrder)
 .tracking-list strong,
 .tracking-list span {
   display: block;
+  overflow-wrap: anywhere;
 }
 
 .tracking-list strong {
@@ -1626,6 +1638,7 @@ onMounted(loadOrder)
 .after-sale-card dd {
   color: #111827;
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .after-sale-images {
@@ -1754,11 +1767,13 @@ onMounted(loadOrder)
   color: #111827;
   font-weight: 900;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .pay-panel {
   position: sticky;
   top: 96px;
+  min-width: 0;
   padding: 24px;
 }
 
@@ -1813,7 +1828,25 @@ onMounted(loadOrder)
 
 @media (max-width: 760px) {
   .order-shell {
-    padding: 28px 16px 52px;
+    padding: 22px 12px calc(44px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .order-hero {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .order-hero h1 {
+    margin-top: 8px;
+    font-size: clamp(30px, 9vw, 38px);
+    line-height: 1.08;
+  }
+
+  .order-hero p {
+    max-width: 100%;
+    margin-top: 8px;
+    overflow-wrap: anywhere;
+    font-size: 14px;
   }
 
   .order-hero,
@@ -1824,13 +1857,64 @@ onMounted(loadOrder)
     flex-direction: column;
   }
 
+  .detail-layout {
+    gap: 14px;
+  }
+
+  .detail-main {
+    gap: 14px;
+  }
+
+  .detail-block,
+  .pay-panel,
+  .login-needed {
+    padding: 18px;
+    border-radius: 10px;
+  }
+
+  .status-heading,
+  .block-heading {
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .status-heading h2,
+  .block-heading h2,
+  .detail-block h2 {
+    margin-top: 7px;
+    font-size: 22px;
+    line-height: 1.2;
+  }
+
+  .status-block {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .status-block :deep(.el-steps) {
+    min-width: 520px;
+    padding-bottom: 4px;
+  }
+
+  .status-block :deep(.el-step__title) {
+    font-size: 13px;
+    line-height: 1.25;
+  }
+
+  .status-block :deep(.el-step__description) {
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
   .order-item {
-    grid-template-columns: 70px minmax(0, 1fr);
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
   }
 
   .order-item img {
-    width: 70px;
-    height: 70px;
+    width: 76px;
+    height: 76px;
   }
 
   .item-qty,
@@ -1839,9 +1923,40 @@ onMounted(loadOrder)
     text-align: left;
   }
 
+  .item-qty {
+    margin-top: -4px;
+    font-size: 13px;
+  }
+
+  .item-price {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: -2px;
+  }
+
+  .item-price strong,
+  .item-price em,
+  .item-price button {
+    display: inline-flex;
+    margin-top: 0;
+    margin-left: 0;
+  }
+
+  .order-comment-preview {
+    grid-column: 1 / -1;
+  }
+
+  .detail-block dl > div,
+  .pay-panel dl > div {
+    gap: 12px;
+  }
+
   .detail-block dd,
   .pay-panel dd {
-    max-width: 60%;
+    max-width: 58%;
+    font-size: 14px;
   }
 
   .after-sale-actions {
@@ -1861,6 +1976,72 @@ onMounted(loadOrder)
   .after-sale-actions :deep(.el-button) {
     width: 100%;
     margin-left: 0;
+  }
+
+  .pay-panel {
+    order: -1;
+  }
+}
+
+@media (max-width: 420px) {
+  .order-shell {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .detail-block,
+  .pay-panel,
+  .login-needed {
+    padding: 16px;
+  }
+
+  .order-item {
+    grid-template-columns: 68px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .order-item img {
+    width: 68px;
+    height: 68px;
+  }
+
+  .item-copy strong {
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  .detail-block dl > div,
+  .pay-panel dl > div,
+  .after-sale-card dl > div {
+    display: grid;
+    grid-template-columns: 78px minmax(0, 1fr);
+  }
+
+  .detail-block dd,
+  .pay-panel dd {
+    max-width: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .order-shell {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .detail-block,
+  .pay-panel,
+  .login-needed {
+    padding: 14px;
+  }
+
+  .order-item {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+
+  .order-item img {
+    width: 62px;
+    height: 62px;
   }
 }
 </style>

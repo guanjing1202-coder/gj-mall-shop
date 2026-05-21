@@ -318,6 +318,7 @@ async function fetchUnreadMessages() {
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 32px;
+  width: 100%;
   max-width: 1240px;
   height: 72px;
   margin: 0 auto;
@@ -379,6 +380,7 @@ async function fetchUnreadMessages() {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  max-width: 100%;
   width: fit-content;
   justify-self: center;
   padding: 5px;
@@ -408,6 +410,7 @@ async function fetchUnreadMessages() {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
 }
 
 .icon-action,
@@ -552,25 +555,134 @@ async function fetchUnreadMessages() {
 }
 
 @media (max-width: 760px) {
-  .shop-header__inner {
-    grid-template-columns: 1fr auto;
-    height: auto;
-    gap: 14px;
-    padding: 14px 16px;
+  .shop-header {
+    position: sticky;
+    top: 0;
   }
 
-  .shop-nav {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-    overflow-x: auto;
+  .shop-header__inner {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "nav nav";
+    height: auto;
+    gap: 12px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 10px;
   }
 
   .brand {
+    grid-area: brand;
     min-width: 0;
   }
 
+  .brand__mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+    font-size: 13px;
+  }
+
+  .brand strong {
+    font-size: 16px;
+  }
+
+  .brand small {
+    font-size: 11px;
+  }
+
+  .shop-nav {
+    grid-area: nav;
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    justify-content: flex-start;
+    width: 100%;
+    overflow-x: auto;
+    padding: 4px;
+    border-radius: 16px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .shop-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .shop-nav__item {
+    flex: 0 0 auto;
+    min-width: auto;
+    padding: 8px 13px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
   .shop-actions {
+    grid-area: actions;
     gap: 6px;
+  }
+
+  .icon-action,
+  .account-action {
+    height: 38px;
+    border-radius: 11px;
+  }
+
+  .icon-action {
+    width: 38px;
+    font-size: 18px;
+  }
+
+  .account-action {
+    min-width: 0;
+    padding: 0 10px;
+  }
+
+  .account-action--user {
+    max-width: 128px;
+  }
+
+  .account-action--user > span:not(.account-avatar) {
+    max-width: 62px;
+  }
+}
+
+@media (max-width: 420px) {
+  .shop-header__inner {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .brand {
+    gap: 9px;
+  }
+
+  .shop-actions {
+    gap: 5px;
+  }
+
+  .icon-action {
+    width: 36px;
+    height: 36px;
+  }
+
+  .account-action {
+    height: 36px;
+    padding: 0 9px;
+  }
+
+  .account-avatar {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+@media (max-width: 360px) {
+  .brand small,
+  .account-action--user > span:not(.account-avatar) {
+    display: none;
+  }
+
+  .shop-nav__item {
+    padding-inline: 12px;
   }
 }
 </style>
