@@ -22,7 +22,10 @@ import com.gj.mall.pay.vo.PayResultVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.annotation.PostConstruct;
 import javax.crypto.Mac;
@@ -46,6 +49,7 @@ public class PayServiceImpl implements PayService {
     private final PayCallbackRecordMapper callbackRecordMapper;
     private final PayCallbackProperties callbackProperties;
     private final ObjectMapper objectMapper;
+    private final PlatformTransactionManager transactionManager;
 
     private final Map<String, PayStrategy> strategyMap = new HashMap<>();
 
@@ -117,8 +121,43 @@ public class PayServiceImpl implements PayService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public PayCallbackResultVO handleCallback(String channel, Map<String, Object> payload, Map<String, String> headers) {
+        try {
+            return callbackTransactionTemplate().execute(status -> processCallback(channel, payload, headers, null));
+        } catch (RuntimeException ex) {
+            throw ex;
+        }
+    }
+
+    @Override
+    public PayCallbackResultVO replayCallback(Long callbackId) {
+        PayCallbackRecord source = callbackRecordMapper.selectById(callbackId);
+        if (source == null) {
+            throw new BizException(ResultCode.DATA_NOT_FOUND, "回调记录不存在");
+        }
+        if (!Integer.valueOf(3).equals(source.getProcessStatus())) {
+            throw new BizException(ResultCode.OPERATION_FORBIDDEN, "仅处理失败的回调可重放");
+        }
+        if (Integer.valueOf(2).equals(source.getSignatureStatus())) {
+            throw new BizException(ResultCode.OPERATION_FORBIDDEN, "验签失败回调不可重放");
+        }
+        Map<String, Object> payload = parseObjectMap(source.getRawData());
+        Map<String, String> headers = parseStringMap(source.getRequestHeaders());
+        String channel = firstNonBlank(source.getChannelName(), Optional.ofNullable(PayChannel.of(source.getChannel()))
+                .map(PayChannel::getName)
+                .orElse(null));
+        PayCallbackResultVO result;
+        try {
+            result = callbackTransactionTemplate().execute(status -> processCallback(channel, payload, headers, source));
+        } catch (RuntimeException ex) {
+            updateReplaySource(source, 3, source.getErrorMessage(), "重放失败：" + ex.getMessage());
+            throw ex;
+        }
+        updateReplaySource(source, 1, source.getErrorMessage(), "重放成功：" + result.getCallbackNo());
+        return result;
+    }
+
+    private PayCallbackResultVO processCallback(String channel, Map<String, Object> payload, Map<String, String> headers, PayCallbackRecord replaySource) {
         PayChannel payChannel = PayChannel.ofName(channel);
         if (payChannel == null) {
             throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT, "未知回调渠道：" + channel);
@@ -145,12 +184,12 @@ public class PayServiceImpl implements PayService {
         callbackRecord.setRawData(rawData);
         callbackRecord.setRequestHeaders(toJson(safeHeaders));
 
-        int signatureStatus = verifySignatureStatus(safePayload, safeHeaders);
+        int signatureStatus = replaySource == null ? verifySignatureStatus(safePayload, safeHeaders) : replaySource.getSignatureStatus();
         callbackRecord.setSignatureStatus(signatureStatus);
         if (signatureStatus == 2) {
             callbackRecord.setProcessStatus(3);
             callbackRecord.setErrorMessage("签名校验失败");
-            callbackRecordMapper.insert(callbackRecord);
+            saveCallbackRecord(callbackRecord);
             throw new BizException(ResultCode.PAY_FAIL, "支付回调签名校验失败");
         }
 
@@ -198,7 +237,7 @@ public class PayServiceImpl implements PayService {
         } catch (RuntimeException ex) {
             callbackRecord.setProcessStatus(3);
             callbackRecord.setErrorMessage(ex.getMessage());
-            callbackRecordMapper.insert(callbackRecord);
+            saveCallbackRecord(callbackRecord);
             throw ex;
         }
     }
@@ -335,5 +374,70 @@ public class PayServiceImpl implements PayService {
     private String genCallbackNo(String channel) {
         return "CB" + channel.toUpperCase(Locale.ROOT) + System.currentTimeMillis()
                 + String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
+    }
+
+    private TransactionTemplate callbackTransactionTemplate() {
+        return new TransactionTemplate(transactionManager);
+    }
+
+    private void saveCallbackRecord(PayCallbackRecord callbackRecord) {
+        requiresNewTransactionTemplate().executeWithoutResult(status -> callbackRecordMapper.insert(callbackRecord));
+    }
+
+    private void updateReplaySource(PayCallbackRecord source, Integer processStatus, String oldMessage, String message) {
+        PayCallbackRecord update = new PayCallbackRecord();
+        update.setId(source.getId());
+        update.setProcessStatus(processStatus);
+        update.setRetryCount((source.getRetryCount() == null ? 0 : source.getRetryCount()) + 1);
+        update.setErrorMessage(appendMessage(oldMessage, message));
+        requiresNewTransactionTemplate().executeWithoutResult(status -> callbackRecordMapper.updateById(update));
+    }
+
+    private TransactionTemplate requiresNewTransactionTemplate() {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return template;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseObjectMap(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return Collections.emptyMap();
+        }
+        try {
+            Object value = objectMapper.readValue(json, Map.class);
+            if (value instanceof Map) {
+                return new LinkedHashMap<>((Map<String, Object>) value);
+            }
+            return Collections.emptyMap();
+        } catch (Exception ex) {
+            throw new BizException(ResultCode.PARAM_ERROR, "回调原始报文解析失败");
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> parseStringMap(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return Collections.emptyMap();
+        }
+        try {
+            Object value = objectMapper.readValue(json, Map.class);
+            if (!(value instanceof Map)) {
+                return Collections.emptyMap();
+            }
+            Map<String, String> result = new LinkedHashMap<>();
+            ((Map<Object, Object>) value).forEach((key, item) -> {
+                if (key != null && item != null) {
+                    result.put(String.valueOf(key), String.valueOf(item));
+                }
+            });
+            return result;
+        } catch (Exception ex) {
+            throw new BizException(ResultCode.PARAM_ERROR, "回调请求头解析失败");
+        }
+    }
+
+    private String appendMessage(String source, String text) {
+        return source == null || source.trim().isEmpty() ? text : source + "\n" + text;
     }
 }

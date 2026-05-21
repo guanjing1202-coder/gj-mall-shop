@@ -13,6 +13,7 @@ import {
   markPaymentFailed,
   markPaymentPaid,
   refundPayment,
+  replayCallback,
   retryRefund,
   type ApiId,
   type PaymentAccess,
@@ -21,6 +22,10 @@ import {
   type PaymentRecord,
   type PaymentSummary,
 } from '@/api/payment'
+import {
+  canReplayPaymentCallback,
+  paymentCallbackReplayReason,
+} from '@/utils/payment-callback-ui'
 
 const route = useRoute()
 const loading = ref(false)
@@ -28,6 +33,7 @@ const summaryLoading = ref(false)
 const detailLoading = ref(false)
 const callbackLoading = ref(false)
 const actionId = ref<ApiId>()
+const callbackActionId = ref<ApiId>()
 const payments = ref<PaymentRecord[]>([])
 const summary = ref<PaymentSummary>(createEmptySummary())
 const access = ref<PaymentAccess>(createEmptyAccess())
@@ -375,6 +381,34 @@ function handleMarkRefundFailed(record: PaymentRecord) {
   })
 }
 
+function handleReplayCallback(item: PaymentCallbackRecord) {
+  const disabledReason = paymentCallbackReplayReason(item)
+  if (disabledReason) {
+    message.warning(disabledReason)
+    return
+  }
+  Modal.confirm({
+    title: '确认重放支付回调吗？',
+    content: `回调流水：${item.callbackNo}`,
+    async onOk() {
+      callbackActionId.value = item.id
+      try {
+        await replayCallback(item.id)
+        message.success('支付回调已重放')
+        const keyword = currentPayment.value?.payNo || item.payNo
+        await fetchCallbacks(keyword)
+        await fetchSummary()
+        await fetchPayments()
+        if (currentPayment.value?.id) {
+          await refreshCurrentPayment(currentPayment.value.id)
+        }
+      } finally {
+        callbackActionId.value = undefined
+      }
+    },
+  })
+}
+
 async function refreshCurrentPayment(id: ApiId) {
   if (currentPayment.value?.id !== id) {
     return
@@ -454,6 +488,10 @@ function canRetryRefund(record: PaymentRecord) {
 
 function canMarkRefundFailed(record: PaymentRecord) {
   return record.refundRecord?.status === 0
+}
+
+function canReplayCallback(item: PaymentCallbackRecord) {
+  return canReplayPaymentCallback(item)
 }
 
 function refundStatusColor(status?: number) {
@@ -832,6 +870,15 @@ function signatureStatusColor(status?: number) {
                       {{ item.processStatusDesc || '--' }}
                     </a-tag>
                     <a-tag v-if="item.errorMessage" color="red">{{ item.errorMessage }}</a-tag>
+                    <a-button
+                      v-if="canReplayCallback(item)"
+                      size="small"
+                      type="primary"
+                      :loading="callbackActionId === item.id"
+                      @click="handleReplayCallback(item)"
+                    >
+                      重放回调
+                    </a-button>
                   </a-space>
                 </div>
               </a-timeline-item>

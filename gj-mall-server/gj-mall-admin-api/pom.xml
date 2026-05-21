@@ -14,6 +14,7 @@
         <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-user</artifactId></dependency>
         <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-product</artifactId></dependency>
         <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-order</artifactId></dependency>
+        <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-pay</artifactId></dependency>
         <dependency><groupId>com.gj.mall</groupId><artifactId>gj-mall-marketing</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-aop</artifactId></dependency>
         <dependency>

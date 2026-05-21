@@ -27,6 +27,7 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.mapper.PayRefundRecordMapper;
 import com.gj.mall.order.service.OrderService;
+import com.gj.mall.pay.service.PayService;
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +52,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
     private final OmsOrderMapper orderMapper;
     private final UmsUserMapper userMapper;
     private final OrderService orderService;
+    private final PayService payService;
 
     @Value("${mall.pay.mode:mock}")
     private String payMode;
@@ -309,6 +311,11 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         refundUpdate.setCallbackData(appendCallback(refundRecord.getCallbackData(),
                 "admin-mark-refund-failed reason=" + StrUtil.blankToDefault(StrUtil.trim(reason), "-")));
         refundRecordMapper.updateById(refundUpdate);
+    }
+
+    @Override
+    public void replayCallback(Long callbackId) {
+        payService.replayCallback(callbackId);
     }
 
     private PayPaymentRecord getByIdOrThrow(Long id) {

@@ -9,6 +9,7 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.mapper.PayRefundRecordMapper;
 import com.gj.mall.order.service.OrderService;
+import com.gj.mall.pay.service.PayService;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import org.junit.jupiter.api.Test;
 
@@ -34,13 +35,15 @@ class AdminPaymentServiceImplTest {
         OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
         UmsUserMapper userMapper = mock(UmsUserMapper.class);
         OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
         AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
                 recordMapper,
                 callbackRecordMapper,
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
-                orderService);
+                orderService,
+                payService);
 
         PayRefundRecord refund = failedRefund();
         PayPaymentRecord payment = paidPayment();
@@ -72,13 +75,15 @@ class AdminPaymentServiceImplTest {
         OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
         UmsUserMapper userMapper = mock(UmsUserMapper.class);
         OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
         AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
                 recordMapper,
                 callbackRecordMapper,
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
-                orderService);
+                orderService,
+                payService);
 
         PayRefundRecord refund = failedRefund();
         refund.setStatus(1);
@@ -100,13 +105,15 @@ class AdminPaymentServiceImplTest {
         OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
         UmsUserMapper userMapper = mock(UmsUserMapper.class);
         OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
         AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
                 recordMapper,
                 callbackRecordMapper,
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
-                orderService);
+                orderService,
+                payService);
 
         PayRefundRecord refund = failedRefund();
         refund.setStatus(0);
@@ -122,6 +129,29 @@ class AdminPaymentServiceImplTest {
                         && update.getCallbackData().contains("渠道返回失败")));
         verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
         verify(orderMapper, never()).updateById(any(OmsOrder.class));
+    }
+
+    @Test
+    void replayCallbackDelegatesToPayService() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService);
+
+        service.replayCallback(88L);
+
+        verify(payService).replayCallback(88L);
     }
 
     private PayRefundRecord failedRefund() {

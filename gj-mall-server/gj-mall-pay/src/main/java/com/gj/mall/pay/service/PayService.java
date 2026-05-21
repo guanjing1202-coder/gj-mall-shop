@@ -16,4 +16,7 @@ public interface PayService {
 
     /** 第三方支付回调统一入口：先记录，再验签、幂等并推进流水。 */
     PayCallbackResultVO handleCallback(String channel, Map<String, Object> payload, Map<String, String> headers);
+
+    /** 后台重放处理失败的支付回调。 */
+    PayCallbackResultVO replayCallback(Long callbackId);
 }

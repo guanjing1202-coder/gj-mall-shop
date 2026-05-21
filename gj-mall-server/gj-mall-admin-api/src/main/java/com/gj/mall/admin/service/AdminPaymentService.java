@@ -30,4 +30,6 @@ public interface AdminPaymentService {
     void retryRefund(Long refundId);
 
     void markRefundFailed(Long refundId, String reason);
+
+    void replayCallback(Long callbackId);
 }

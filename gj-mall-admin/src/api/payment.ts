@@ -165,6 +165,10 @@ export function getPaymentCallbackPage(params: PaymentCallbackQuery) {
   return request.get<ApiResult<PageResult<PaymentCallbackRecord>>>('/api/admin/payment/callback/page', { params })
 }
 
+export function replayCallback(callbackId: ApiId) {
+  return request.put<ApiResult<void>>(`/api/admin/payment/callback/${callbackId}/replay`)
+}
+
 export function getPaymentPage(params: PaymentQuery) {
   return request.get<ApiResult<PageResult<PaymentRecord>>>('/api/admin/payment/page', { params })
 }

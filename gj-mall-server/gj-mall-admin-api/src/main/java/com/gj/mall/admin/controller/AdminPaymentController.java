@@ -41,6 +41,13 @@ public class AdminPaymentController {
         return Result.success(paymentService.callbackPage(query));
     }
 
+    @Operation(summary = "重放失败支付回调")
+    @PutMapping("/callback/{callbackId}/replay")
+    public Result<Void> replayCallback(@PathVariable Long callbackId) {
+        paymentService.replayCallback(callbackId);
+        return Result.success();
+    }
+
     @Operation(summary = "支付记录分页")
     @GetMapping("/page")
     public Result<PageResult<AdminPaymentVO>> page(AdminPaymentQueryDTO query) {
