@@ -13,6 +13,7 @@ import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -74,6 +75,16 @@ class UserMessageServiceImplTest {
 
         assertEquals("售后通知", vo.getTypeDesc());
         verify(messageMapper).selectPage(any(Page.class), any(Wrapper.class));
+    }
+
+    @Test
+    void clearReadDeletesOnlyCurrentUsersReadMessages() {
+        UmsUserMessageMapper messageMapper = mock(UmsUserMessageMapper.class);
+        UserMessageServiceImpl service = new UserMessageServiceImpl(messageMapper);
+
+        service.clearRead(1001L);
+
+        verify(messageMapper).clearRead(eq(1001L));
     }
 
     private UmsUserMessage message(String type, Integer readStatus) {

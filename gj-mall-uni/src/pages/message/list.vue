@@ -6,7 +6,10 @@
         <text class="title">消息中心</text>
         <text class="subtitle">{{ currentFilterText }} · {{ selectedTypeLabel }}</text>
       </view>
-      <button v-if="isLoggedIn" :disabled="!unreadTotal" @tap="readAll">{{ unreadTotal ? '全部已读' : '无未读' }}</button>
+      <view v-if="isLoggedIn" class="hero-actions">
+        <button :disabled="!unreadTotal || batchOperating" @tap="readAll">{{ unreadTotal ? '全部已读' : '无未读' }}</button>
+        <button :disabled="!readTotal || batchOperating" class="secondary" @tap="clearRead">清空已读</button>
+      </view>
     </view>
 
     <view v-if="isLoggedIn" class="summary-grid">
@@ -101,15 +104,21 @@
 import { computed, ref } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import {
+  clearReadMessages,
   deleteMessage,
   getMessagePage,
   getMessageSummary,
   markAllMessagesRead,
   markMessageRead,
-  type MessageSummary,
   type UserMessage,
 } from '@/api/message'
 import { syncSession } from '@/utils/session'
+import {
+  emptyMessageSummary,
+  messageTypeFilters,
+  normalizeMessageSummary,
+  type NormalizedMessageSummary,
+} from '@/utils/message-summary'
 
 const filters = [
   { label: '全部', value: undefined },
@@ -125,23 +134,12 @@ const total = ref(0)
 const finished = ref(false)
 const readStatus = ref<number | undefined>()
 const selectedType = ref<string | undefined>()
-const summary = ref<MessageSummary>({
-  total: 0,
-  unreadTotal: 0,
-  readTotal: 0,
-  typeItems: [],
-})
+const batchOperating = ref(false)
+const summary = ref<NormalizedMessageSummary>(emptyMessageSummary())
 
 const unreadTotal = computed(() => Number(summary.value.unreadTotal || 0))
-const typeFilters = computed(() => [
-  {
-    type: undefined,
-    typeDesc: '全部',
-    total: Number(summary.value.total || 0),
-    unreadTotal: Number(summary.value.unreadTotal || 0),
-  },
-  ...(summary.value.typeItems || []),
-])
+const readTotal = computed(() => Number(summary.value.readTotal || 0))
+const typeFilters = computed(() => messageTypeFilters(summary.value))
 const currentFilterText = computed(() => {
   if (readStatus.value === 0) return '未读消息'
   if (readStatus.value === 1) return '已读消息'
@@ -189,7 +187,7 @@ async function loadMessages(reset: boolean) {
     const list = page?.list || []
     messages.value = reset ? list : [...messages.value, ...list]
     total.value = Number(page?.total || 0)
-    summary.value = summaryRes.data || summary.value
+    summary.value = normalizeMessageSummary(summaryRes.data)
     finished.value = messages.value.length >= total.value || !list.length
     pageNum.value += 1
   } finally {
@@ -208,10 +206,36 @@ async function switchType(type?: string) {
 }
 
 async function readAll() {
-  if (!unreadTotal.value) return
-  await markAllMessagesRead()
-  uni.showToast({ title: '已全部已读', icon: 'success' })
-  await refresh()
+  if (!unreadTotal.value || batchOperating.value) return
+  batchOperating.value = true
+  try {
+    await markAllMessagesRead()
+    uni.showToast({ title: '已全部已读', icon: 'success' })
+    await refresh()
+  } finally {
+    batchOperating.value = false
+  }
+}
+
+async function clearRead() {
+  if (!readTotal.value || batchOperating.value) return
+  uni.showModal({
+    title: '清空已读消息',
+    content: '已读消息会从列表移除，未读消息会保留。',
+    confirmText: '清空已读',
+    confirmColor: '#e5484d',
+    success: async (res) => {
+      if (!res.confirm) return
+      batchOperating.value = true
+      try {
+        await clearReadMessages()
+        uni.showToast({ title: '已读已清空', icon: 'success' })
+        await refresh()
+      } finally {
+        batchOperating.value = false
+      }
+    },
+  })
 }
 
 async function openMessage(item: UserMessage) {
@@ -304,8 +328,14 @@ function formatTime(value?: string) {
   font-size: 24rpx;
 }
 
-.hero button {
+.hero-actions {
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.hero button {
   height: 60rpx;
   margin: 0;
   padding: 0 22rpx;
@@ -315,6 +345,11 @@ function formatTime(value?: string) {
   font-size: 23rpx;
   font-weight: 900;
   line-height: 60rpx;
+}
+
+.hero button.secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .summary-grid {

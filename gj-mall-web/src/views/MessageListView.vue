@@ -1,18 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import ShopHeader from '@/components/ShopHeader.vue'
 import {
+  clearReadMessages,
   deleteMessage,
   getMessagePage,
   getMessageSummary,
   markAllMessagesRead,
   markMessageRead,
-  type MessageSummary,
   type UserMessage,
 } from '@/api/message'
 import { useAuthStore } from '@/stores/auth'
+import {
+  emptyMessageSummary,
+  messageTypeFilters,
+  normalizeMessageSummary,
+  type NormalizedMessageSummary,
+} from '@/utils/message-summary'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -23,23 +29,12 @@ const current = ref(1)
 const pageSize = ref(10)
 const readStatus = ref<number | undefined>()
 const selectedType = ref<string | undefined>()
-const summary = ref<MessageSummary>({
-  total: 0,
-  unreadTotal: 0,
-  readTotal: 0,
-  typeItems: [],
-})
+const batchOperating = ref(false)
+const summary = ref<NormalizedMessageSummary>(emptyMessageSummary())
 
 const unreadTotal = computed(() => Number(summary.value.unreadTotal || 0))
-const typeFilters = computed(() => [
-  {
-    type: undefined,
-    typeDesc: '全部',
-    total: Number(summary.value.total || 0),
-    unreadTotal: Number(summary.value.unreadTotal || 0),
-  },
-  ...(summary.value.typeItems || []),
-])
+const readTotal = computed(() => Number(summary.value.readTotal || 0))
+const typeFilters = computed(() => messageTypeFilters(summary.value))
 
 onMounted(loadMessages)
 
@@ -52,12 +47,7 @@ watch(
     }
     messages.value = []
     total.value = 0
-    summary.value = {
-      total: 0,
-      unreadTotal: 0,
-      readTotal: 0,
-      typeItems: [],
-    }
+    summary.value = emptyMessageSummary()
   },
 )
 
@@ -80,7 +70,7 @@ async function loadMessages() {
     const res = pageRes
     messages.value = res.data?.list || []
     total.value = Number(res.data?.total || 0)
-    summary.value = summaryRes.data || summary.value
+    summary.value = normalizeMessageSummary(summaryRes.data)
   } finally {
     loading.value = false
   }
@@ -96,9 +86,39 @@ async function readMessage(item: UserMessage) {
 }
 
 async function readAll() {
-  await markAllMessagesRead()
-  ElMessage.success('已全部标记为已读')
-  await loadMessages()
+  if (!unreadTotal.value || batchOperating.value) return
+  batchOperating.value = true
+  try {
+    await markAllMessagesRead()
+    ElMessage.success('已全部标记为已读')
+    await loadMessages()
+  } finally {
+    batchOperating.value = false
+  }
+}
+
+async function clearRead() {
+  if (!readTotal.value || batchOperating.value) return
+  try {
+    await ElMessageBox.confirm('清空后已读消息会从列表中移除，未读消息会保留。', '清空已读消息', {
+      confirmButtonText: '清空已读',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  batchOperating.value = true
+  try {
+    await clearReadMessages()
+    ElMessage.success('已读消息已清空')
+    if (readStatus.value === 1 && current.value > 1) {
+      current.value = 1
+    }
+    await loadMessages()
+  } finally {
+    batchOperating.value = false
+  }
 }
 
 async function removeMessage(item: UserMessage) {
@@ -159,7 +179,8 @@ function currentFilterText() {
           <el-button @click="switchFilter(undefined)">全部</el-button>
           <el-button @click="switchFilter(0)">未读</el-button>
           <el-button @click="switchFilter(1)">已读</el-button>
-          <el-button type="primary" :disabled="!unreadTotal" @click="readAll">全部已读</el-button>
+          <el-button type="primary" :disabled="!unreadTotal" :loading="batchOperating" @click="readAll">全部已读</el-button>
+          <el-button :disabled="!readTotal" :loading="batchOperating" @click="clearRead">清空已读</el-button>
         </div>
       </section>
 

@@ -132,6 +132,12 @@ public class UserMessageServiceImpl implements UserMessageService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void clearRead(Long userId) {
+        messageMapper.clearRead(userId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void delete(Long userId, Long id) {
         mustOwn(userId, id);
         messageMapper.deleteById(id);

@@ -18,5 +18,7 @@ public interface UserMessageService {
 
     void markAllRead(Long userId);
 
+    void clearRead(Long userId);
+
     void delete(Long userId, Long id);
 }

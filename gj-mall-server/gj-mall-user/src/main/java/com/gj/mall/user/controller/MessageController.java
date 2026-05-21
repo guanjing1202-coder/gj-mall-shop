@@ -61,6 +61,13 @@ public class MessageController {
         return Result.success();
     }
 
+    @Operation(summary = "清空已读消息")
+    @DeleteMapping("/read")
+    public Result<Void> clearRead() {
+        messageService.clearRead(UserContext.getUserId());
+        return Result.success();
+    }
+
     @Operation(summary = "删除消息")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {

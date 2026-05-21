@@ -57,6 +57,10 @@ export function markAllMessagesRead() {
   return request.post<ApiResult<void>>('/api/user/message/read-all')
 }
 
+export function clearReadMessages() {
+  return request.delete<ApiResult<void>>('/api/user/message/read')
+}
+
 export function deleteMessage(id: ApiId) {
   return request.delete<ApiResult<void>>(`/api/user/message/${id}`)
 }
