@@ -260,10 +260,69 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         orderMapper.updateById(orderUpdate);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void retryRefund(Long refundId) {
+        PayRefundRecord refundRecord = getRefundByIdOrThrow(refundId);
+        if (!Integer.valueOf(0).equals(refundRecord.getStatus())
+                && !Integer.valueOf(2).equals(refundRecord.getStatus())) {
+            throw new BizException(ResultCode.OPERATION_FORBIDDEN, "仅退款中或退款失败记录可重试");
+        }
+        PayPaymentRecord payment = getByIdOrThrow(refundRecord.getPaymentId());
+        OmsOrder order = orderMapper.selectById(refundRecord.getOrderId());
+        if (order == null) {
+            throw new BizException(ResultCode.ORDER_NOT_FOUND);
+        }
+        LocalDateTime now = LocalDateTime.now();
+
+        PayRefundRecord refundUpdate = new PayRefundRecord();
+        refundUpdate.setId(refundRecord.getId());
+        refundUpdate.setStatus(1);
+        refundUpdate.setSuccessTime(now);
+        refundUpdate.setCallbackData(appendCallback(refundRecord.getCallbackData(),
+                "admin-retry-refund success paymentId=" + payment.getId()));
+        refundRecordMapper.updateById(refundUpdate);
+
+        PayPaymentRecord paymentUpdate = new PayPaymentRecord();
+        paymentUpdate.setId(payment.getId());
+        paymentUpdate.setStatus(3);
+        paymentUpdate.setCallbackData(appendCallback(payment.getCallbackData(),
+                "admin-retry-refund refundNo=" + refundRecord.getRefundNo()));
+        recordMapper.updateById(paymentUpdate);
+
+        OmsOrder orderUpdate = new OmsOrder();
+        orderUpdate.setId(order.getId());
+        orderUpdate.setStatus(OrderStatus.REFUNDED.getCode());
+        orderMapper.updateById(orderUpdate);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void markRefundFailed(Long refundId, String reason) {
+        PayRefundRecord refundRecord = getRefundByIdOrThrow(refundId);
+        if (!Integer.valueOf(0).equals(refundRecord.getStatus())) {
+            throw new BizException(ResultCode.OPERATION_FORBIDDEN, "仅退款中记录可标记失败");
+        }
+        PayRefundRecord refundUpdate = new PayRefundRecord();
+        refundUpdate.setId(refundRecord.getId());
+        refundUpdate.setStatus(2);
+        refundUpdate.setCallbackData(appendCallback(refundRecord.getCallbackData(),
+                "admin-mark-refund-failed reason=" + StrUtil.blankToDefault(StrUtil.trim(reason), "-")));
+        refundRecordMapper.updateById(refundUpdate);
+    }
+
     private PayPaymentRecord getByIdOrThrow(Long id) {
         PayPaymentRecord record = recordMapper.selectById(id);
         if (record == null) {
             throw new BizException(ResultCode.PAY_RECORD_NOT_FOUND);
+        }
+        return record;
+    }
+
+    private PayRefundRecord getRefundByIdOrThrow(Long id) {
+        PayRefundRecord record = refundRecordMapper.selectById(id);
+        if (record == null) {
+            throw new BizException(ResultCode.PAY_RECORD_NOT_FOUND, "退款记录不存在");
         }
         return record;
     }

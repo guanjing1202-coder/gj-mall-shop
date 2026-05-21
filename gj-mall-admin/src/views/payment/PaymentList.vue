@@ -9,9 +9,11 @@ import {
   getPaymentDetail,
   getPaymentPage,
   getPaymentSummary,
+  markRefundFailed,
   markPaymentFailed,
   markPaymentPaid,
   refundPayment,
+  retryRefund,
   type ApiId,
   type PaymentAccess,
   type PaymentCallbackRecord,
@@ -327,6 +329,52 @@ async function submitRefund() {
   }
 }
 
+function handleRetryRefund(record: PaymentRecord) {
+  const refundRecord = record.refundRecord
+  if (!refundRecord) {
+    return
+  }
+  Modal.confirm({
+    title: '确认重试退款吗？',
+    content: `退款流水：${refundRecord.refundNo}`,
+    async onOk() {
+      actionId.value = record.id
+      try {
+        await retryRefund(refundRecord.id)
+        message.success('退款重试已成功')
+        await fetchSummary()
+        await fetchPayments()
+        await refreshCurrentPayment(record.id)
+      } finally {
+        actionId.value = undefined
+      }
+    },
+  })
+}
+
+function handleMarkRefundFailed(record: PaymentRecord) {
+  const refundRecord = record.refundRecord
+  if (!refundRecord) {
+    return
+  }
+  Modal.confirm({
+    title: '确认标记退款失败吗？',
+    content: `退款流水：${refundRecord.refundNo}`,
+    okButtonProps: { danger: true },
+    async onOk() {
+      actionId.value = record.id
+      try {
+        await markRefundFailed(refundRecord.id, '后台手动标记退款失败')
+        message.success('已标记退款失败')
+        await fetchPayments()
+        await refreshCurrentPayment(record.id)
+      } finally {
+        actionId.value = undefined
+      }
+    },
+  })
+}
+
 async function refreshCurrentPayment(id: ApiId) {
   if (currentPayment.value?.id !== id) {
     return
@@ -397,7 +445,25 @@ function canMarkFailed(record: PaymentRecord) {
 }
 
 function canRefund(record: PaymentRecord) {
-  return record.status === 1 && record.orderStatus !== 6
+  return record.status === 1 && record.orderStatus !== 6 && !record.refundRecord
+}
+
+function canRetryRefund(record: PaymentRecord) {
+  return record.refundRecord?.status === 0 || record.refundRecord?.status === 2
+}
+
+function canMarkRefundFailed(record: PaymentRecord) {
+  return record.refundRecord?.status === 0
+}
+
+function refundStatusColor(status?: number) {
+  if (status === 1) {
+    return 'success'
+  }
+  if (status === 2) {
+    return 'error'
+  }
+  return 'processing'
 }
 
 function refundOperatorText(value?: string) {
@@ -649,6 +715,15 @@ function signatureStatusColor(status?: number) {
             >
               退款
             </a-button>
+            <a-button
+              v-if="canRetryRefund(toPayment(record))"
+              type="link"
+              size="small"
+              :loading="actionId === record.id"
+              @click="handleRetryRefund(toPayment(record))"
+            >
+              重试退款
+            </a-button>
           </a-space>
         </template>
       </template>
@@ -701,12 +776,35 @@ function signatureStatusColor(status?: number) {
               </small>
             </div>
             <div class="refund-record-card__amount">
-              <span>{{ currentPayment.refundRecord.statusDesc || '--' }}</span>
+              <a-tag :color="refundStatusColor(currentPayment.refundRecord.status)">
+                {{ currentPayment.refundRecord.statusDesc || '--' }}
+              </a-tag>
               <strong>{{ formatMoney(currentPayment.refundRecord.amount) }}</strong>
             </div>
             <div class="refund-record-card__meta">
               <span v-if="currentPayment.refundRecord.afterSaleNo">售后单：{{ currentPayment.refundRecord.afterSaleNo }}</span>
               <span>退款原因：{{ currentPayment.refundRecord.reason || '--' }}</span>
+              <span v-if="currentPayment.refundRecord.callbackData">处理记录：{{ currentPayment.refundRecord.callbackData }}</span>
+              <a-space v-if="canRetryRefund(currentPayment) || canMarkRefundFailed(currentPayment)" wrap>
+                <a-button
+                  v-if="canRetryRefund(currentPayment)"
+                  size="small"
+                  type="primary"
+                  :loading="actionId === currentPayment.id"
+                  @click="handleRetryRefund(currentPayment)"
+                >
+                  重试退款
+                </a-button>
+                <a-button
+                  v-if="canMarkRefundFailed(currentPayment)"
+                  size="small"
+                  danger
+                  :loading="actionId === currentPayment.id"
+                  @click="handleMarkRefundFailed(currentPayment)"
+                >
+                  标记失败
+                </a-button>
+              </a-space>
             </div>
           </div>
           <a-empty v-else :image="false" description="暂无退款记录" />
@@ -913,11 +1011,6 @@ function signatureStatusColor(status?: number) {
 
 .refund-record-card__amount {
   text-align: right;
-}
-
-.refund-record-card__amount span {
-  color: #16a34a;
-  font-weight: 700;
 }
 
 .refund-record-card__amount strong {

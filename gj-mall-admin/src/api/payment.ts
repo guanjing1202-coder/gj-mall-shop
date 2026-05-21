@@ -188,3 +188,13 @@ export function markPaymentFailed(id: ApiId, reason?: string) {
 export function refundPayment(id: ApiId, data: PaymentRefundPayload) {
   return request.post<ApiResult<void>>(`/api/admin/payment/${id}/refund`, data)
 }
+
+export function retryRefund(refundId: ApiId) {
+  return request.put<ApiResult<void>>(`/api/admin/payment/refund/${refundId}/retry`)
+}
+
+export function markRefundFailed(refundId: ApiId, reason?: string) {
+  return request.put<ApiResult<void>>(`/api/admin/payment/refund/${refundId}/failed`, null, {
+    params: { reason },
+  })
+}

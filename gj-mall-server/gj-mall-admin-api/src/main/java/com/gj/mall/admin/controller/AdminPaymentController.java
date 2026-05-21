@@ -77,4 +77,20 @@ public class AdminPaymentController {
         paymentService.refund(id, dto);
         return Result.success();
     }
+
+    @Operation(summary = "重试退款")
+    @PutMapping("/refund/{refundId}/retry")
+    public Result<Void> retryRefund(@PathVariable Long refundId) {
+        paymentService.retryRefund(refundId);
+        return Result.success();
+    }
+
+    @Operation(summary = "标记退款失败")
+    @PutMapping("/refund/{refundId}/failed")
+    public Result<Void> markRefundFailed(
+            @PathVariable Long refundId,
+            @RequestParam(required = false) String reason) {
+        paymentService.markRefundFailed(refundId, reason);
+        return Result.success();
+    }
 }

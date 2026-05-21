@@ -26,4 +26,8 @@ public interface AdminPaymentService {
     void markFailed(Long id, String reason);
 
     void refund(Long id, AdminPaymentRefundDTO dto);
+
+    void retryRefund(Long refundId);
+
+    void markRefundFailed(Long refundId, String reason);
 }
