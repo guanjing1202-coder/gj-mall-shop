@@ -15,7 +15,7 @@ public class AdminReportQueryDTO {
     private LocalDate endDate;
 
     /**
-     * day/week/month. 当前先按天展示，预留给后续切换统计粒度。
+     * day/week/month. 支持按日、周、月汇总趋势数据。
      */
     private String granularity = "day";
 }

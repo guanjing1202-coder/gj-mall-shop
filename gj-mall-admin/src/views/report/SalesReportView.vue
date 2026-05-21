@@ -2,13 +2,20 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { TableColumnsType } from 'ant-design-vue'
 import { downloadSalesReport, getSalesReport, type CategoryRankItem, type ProductRankItem, type SalesReport } from '@/api/report'
+import {
+  formatReportPeriod,
+  normalizeReportGranularity,
+  reportGranularityName,
+  reportGranularityOptions,
+  type ReportGranularity,
+} from '@/utils/report-granularity'
 
 const loading = ref(false)
 const report = ref<SalesReport>(createEmptyReport())
 const query = reactive({
   startDate: formatDate(offsetDate(-29)),
   endDate: formatDate(new Date()),
-  granularity: 'day',
+  granularity: 'day' as ReportGranularity,
 })
 
 const productColumns: TableColumnsType<ProductRankItem> = [
@@ -49,15 +56,19 @@ const maxMemberCount = computed(() => {
   return Math.max(...report.value.memberGrowth.map((item) => Number(item.newMemberCount || 0)), 1)
 })
 
+const trendSummary = computed(() => `${reportGranularityName(report.value.granularity)}统计，共 ${report.value.salesTrend.length} 个周期`)
+
 onMounted(fetchReport)
 
 async function fetchReport() {
   loading.value = true
   try {
+    query.granularity = normalizeReportGranularity(query.granularity)
     const res = await getSalesReport(query)
     report.value = {
       ...createEmptyReport(),
       ...(res.data || {}),
+      granularity: normalizeReportGranularity(res.data?.granularity),
       overview: {
         ...createEmptyReport().overview,
         ...(res.data?.overview || {}),
@@ -74,12 +85,17 @@ async function fetchReport() {
 }
 
 async function exportReport() {
+  query.granularity = normalizeReportGranularity(query.granularity)
   await downloadSalesReport(query)
 }
 
 function useQuickRange(days: number) {
   query.endDate = formatDate(new Date())
   query.startDate = formatDate(offsetDate(-(days - 1)))
+  fetchReport()
+}
+
+function handleGranularityChange() {
   fetchReport()
 }
 
@@ -123,7 +139,7 @@ function formatDate(date: Date) {
 }
 
 function formatShortDate(value?: string) {
-  return value ? value.slice(5) : '--'
+  return formatReportPeriod(value, report.value.granularity)
 }
 
 function formatMoney(value?: number) {
@@ -161,6 +177,11 @@ function barStyle(value?: number, max = 1) {
             <a-button @click="useQuickRange(7)">近 7 天</a-button>
             <a-button @click="useQuickRange(30)">近 30 天</a-button>
             <a-button @click="useQuickRange(90)">近 90 天</a-button>
+            <a-segmented
+              v-model:value="query.granularity"
+              :options="reportGranularityOptions"
+              @change="handleGranularityChange"
+            />
             <a-input v-model:value="query.startDate" class="date-input" />
             <span class="date-separator">至</span>
             <a-input v-model:value="query.endDate" class="date-input" />
@@ -181,7 +202,7 @@ function barStyle(value?: number, max = 1) {
       <section class="report-panel">
         <div class="panel-header">
           <h3>销售趋势</h3>
-          <span>{{ report.startDate }} 至 {{ report.endDate }}</span>
+          <span>{{ report.startDate }} 至 {{ report.endDate }} · {{ trendSummary }}</span>
         </div>
         <div class="chart-bars">
           <div v-for="item in report.salesTrend" :key="item.date" class="chart-column">

@@ -14,6 +14,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.TemporalAdjusters;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -54,7 +56,7 @@ public class AdminReportServiceImpl implements AdminReportService {
         report.setCategoryRanks(reportMapper.selectCategoryRanks(start, end, 8));
         report.setRefundTrend(reportMapper.selectRefundTrend(start, end));
         report.setMemberGrowth(reportMapper.selectMemberGrowth(start, end));
-        fillMissingDays(report, range);
+        fillTrendBuckets(report, range);
         return report;
     }
 
@@ -78,7 +80,7 @@ public class AdminReportServiceImpl implements AdminReportService {
         writer.write(new String[] { "退款率", overview.getRefundRate() + "%" });
         writer.write(new String[] { "新增会员", String.valueOf(safeLong(overview.getNewMemberCount())) });
         writer.write(new String[] {});
-        writer.write(new String[] { "日期", "订单数", "支付订单", "实收金额", "净收入", "退款金额", "新增会员" });
+        writer.write(new String[] { "周期", "订单数", "支付订单", "实收金额", "净收入", "退款金额", "新增会员" });
         Map<LocalDate, AdminSalesReportVO.RefundTrendItem> refundMap = report.getRefundTrend().stream()
                 .collect(Collectors.toMap(AdminSalesReportVO.RefundTrendItem::getDate, Function.identity(), (a, b) -> a));
         Map<LocalDate, AdminSalesReportVO.MemberGrowthItem> memberMap = report.getMemberGrowth().stream()
@@ -112,30 +114,88 @@ public class AdminReportServiceImpl implements AdminReportService {
         return "\uFEFF" + stringWriter;
     }
 
-    private void fillMissingDays(AdminSalesReportVO report, ReportRange range) {
+    private void fillTrendBuckets(AdminSalesReportVO report, ReportRange range) {
         Map<LocalDate, AdminSalesReportVO.TrendItem> trendMap = report.getSalesTrend().stream()
-                .collect(Collectors.toMap(AdminSalesReportVO.TrendItem::getDate, Function.identity(), (a, b) -> a));
+                .collect(Collectors.toMap(item -> bucketStart(item.getDate(), range), Function.identity(), this::mergeTrend));
         Map<LocalDate, AdminSalesReportVO.RefundTrendItem> refundMap = report.getRefundTrend().stream()
-                .collect(Collectors.toMap(AdminSalesReportVO.RefundTrendItem::getDate, Function.identity(), (a, b) -> a));
+                .collect(Collectors.toMap(item -> bucketStart(item.getDate(), range), Function.identity(), this::mergeRefund));
         Map<LocalDate, AdminSalesReportVO.MemberGrowthItem> memberMap = report.getMemberGrowth().stream()
-                .collect(Collectors.toMap(AdminSalesReportVO.MemberGrowthItem::getDate, Function.identity(), (a, b) -> a));
+                .collect(Collectors.toMap(item -> bucketStart(item.getDate(), range), Function.identity(), this::mergeMember));
 
         report.getSalesTrend().clear();
         report.getRefundTrend().clear();
         report.getMemberGrowth().clear();
-        for (LocalDate date = range.start; !date.isAfter(range.end); date = date.plusDays(1)) {
-            AdminSalesReportVO.TrendItem trend = trendMap.getOrDefault(date, new AdminSalesReportVO.TrendItem());
-            trend.setDate(date);
+        for (LocalDate date = firstBucketStart(range.start, range); !date.isAfter(range.end); date = nextBucketStart(date, range)) {
+            LocalDate bucket = date.isBefore(range.start) ? range.start : date;
+            AdminSalesReportVO.TrendItem trend = trendMap.getOrDefault(bucket, new AdminSalesReportVO.TrendItem());
+            trend.setDate(bucket);
             report.getSalesTrend().add(trend);
 
-            AdminSalesReportVO.RefundTrendItem refund = refundMap.getOrDefault(date, new AdminSalesReportVO.RefundTrendItem());
-            refund.setDate(date);
+            AdminSalesReportVO.RefundTrendItem refund = refundMap.getOrDefault(bucket, new AdminSalesReportVO.RefundTrendItem());
+            refund.setDate(bucket);
             report.getRefundTrend().add(refund);
 
-            AdminSalesReportVO.MemberGrowthItem member = memberMap.getOrDefault(date, new AdminSalesReportVO.MemberGrowthItem());
-            member.setDate(date);
+            AdminSalesReportVO.MemberGrowthItem member = memberMap.getOrDefault(bucket, new AdminSalesReportVO.MemberGrowthItem());
+            member.setDate(bucket);
             report.getMemberGrowth().add(member);
         }
+    }
+
+    private LocalDate bucketStart(LocalDate date, ReportRange range) {
+        LocalDate start;
+        if ("week".equals(range.granularity)) {
+            start = date.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+        } else if ("month".equals(range.granularity)) {
+            start = date.withDayOfMonth(1);
+        } else {
+            start = date;
+        }
+        return start.isBefore(range.start) ? range.start : start;
+    }
+
+    private LocalDate firstBucketStart(LocalDate start, ReportRange range) {
+        if ("week".equals(range.granularity)) {
+            return start.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+        }
+        if ("month".equals(range.granularity)) {
+            return start.withDayOfMonth(1);
+        }
+        return start;
+    }
+
+    private LocalDate nextBucketStart(LocalDate date, ReportRange range) {
+        if ("week".equals(range.granularity)) {
+            return date.plusWeeks(1);
+        }
+        if ("month".equals(range.granularity)) {
+            return date.plusMonths(1).withDayOfMonth(1);
+        }
+        return date.plusDays(1);
+    }
+
+    private AdminSalesReportVO.TrendItem mergeTrend(
+            AdminSalesReportVO.TrendItem left,
+            AdminSalesReportVO.TrendItem right) {
+        left.setOrderCount(safeLong(left.getOrderCount()) + safeLong(right.getOrderCount()));
+        left.setPaidOrderCount(safeLong(left.getPaidOrderCount()) + safeLong(right.getPaidOrderCount()));
+        left.setPaidAmount(safeAmount(left.getPaidAmount()).add(safeAmount(right.getPaidAmount())));
+        left.setNetAmount(safeAmount(left.getNetAmount()).add(safeAmount(right.getNetAmount())));
+        return left;
+    }
+
+    private AdminSalesReportVO.RefundTrendItem mergeRefund(
+            AdminSalesReportVO.RefundTrendItem left,
+            AdminSalesReportVO.RefundTrendItem right) {
+        left.setRefundCount(safeLong(left.getRefundCount()) + safeLong(right.getRefundCount()));
+        left.setRefundAmount(safeAmount(left.getRefundAmount()).add(safeAmount(right.getRefundAmount())));
+        return left;
+    }
+
+    private AdminSalesReportVO.MemberGrowthItem mergeMember(
+            AdminSalesReportVO.MemberGrowthItem left,
+            AdminSalesReportVO.MemberGrowthItem right) {
+        left.setNewMemberCount(safeLong(left.getNewMemberCount()) + safeLong(right.getNewMemberCount()));
+        return left;
     }
 
     private ReportRange normalizeRange(AdminReportQueryDTO query) {
@@ -150,8 +210,16 @@ public class AdminReportServiceImpl implements AdminReportService {
         if (start.plusDays(MAX_DAYS - 1L).isBefore(end)) {
             start = end.minusDays(MAX_DAYS - 1L);
         }
-        String granularity = query == null || query.getGranularity() == null ? "day" : query.getGranularity();
+        String granularity = normalizeGranularity(query == null ? null : query.getGranularity());
         return new ReportRange(start, end, granularity);
+    }
+
+    private String normalizeGranularity(String granularity) {
+        String value = granularity == null ? "day" : granularity.trim().toLowerCase(Locale.ROOT);
+        if ("week".equals(value) || "month".equals(value)) {
+            return value;
+        }
+        return "day";
     }
 
     private BigDecimal percent(Long numerator, Long denominator) {

@@ -87,7 +87,7 @@ export async function downloadSalesReport(params: SalesReportQuery) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `GJ商城经营报表-${params.startDate || ''}-${params.endDate || ''}.csv`
+  link.download = `GJ商城经营报表-${params.granularity || 'day'}-${params.startDate || ''}-${params.endDate || ''}.csv`
   document.body.appendChild(link)
   link.click()
   link.remove()
