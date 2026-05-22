@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import {
   canReplayPaymentCallback,
   formatCallbackSignatureSample,
+  paymentCallbackProcessLabel,
   paymentCallbackReplayReason,
 } from '../payment-callback-ui.ts'
 
@@ -32,5 +33,11 @@ describe('payment-callback-ui', () => {
       '签名原文：amount=99.00&payNo=P1',
       '请求头：x-gj-pay-signature: abc123',
     ])
+  })
+
+  it('uses a broad ignored label for callbacks that are recorded but not booked', () => {
+    assert.equal(paymentCallbackProcessLabel(2), '已忽略')
+    assert.equal(paymentCallbackProcessLabel(1), '已处理')
+    assert.equal(paymentCallbackProcessLabel(3), '处理失败')
   })
 })

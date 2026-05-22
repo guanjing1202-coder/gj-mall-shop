@@ -39,3 +39,19 @@ export function formatCallbackSignatureSample(sample?: PaymentCallbackSignatureS
   }
   return lines
 }
+
+export function paymentCallbackProcessLabel(status?: number, fallback?: string) {
+  if (status === 0) {
+    return '已接收'
+  }
+  if (status === 1) {
+    return '已处理'
+  }
+  if (status === 2) {
+    return '已忽略'
+  }
+  if (status === 3) {
+    return '处理失败'
+  }
+  return fallback || '--'
+}

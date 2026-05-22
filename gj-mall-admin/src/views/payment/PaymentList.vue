@@ -25,6 +25,7 @@ import {
 import {
   canReplayPaymentCallback,
   formatCallbackSignatureSample,
+  paymentCallbackProcessLabel,
   paymentCallbackReplayReason,
 } from '@/utils/payment-callback-ui'
 
@@ -159,7 +160,7 @@ const callbackStatusCards = computed(() => {
   return [
     { label: '最近回调', value: formatNumber(callbacks.value.length), tone: 'slate' },
     { label: '已处理', value: formatNumber(handled), tone: 'green' },
-    { label: '幂等忽略', value: formatNumber(ignored), tone: 'blue' },
+    { label: '已忽略', value: formatNumber(ignored), tone: 'blue' },
     { label: '处理失败', value: formatNumber(failed), tone: 'red' },
   ]
 })
@@ -890,7 +891,7 @@ function signatureStatusColor(status?: number) {
                       {{ item.signatureStatusDesc || '--' }}
                     </a-tag>
                     <a-tag :color="processStatusColor(item.processStatus)">
-                      {{ item.processStatusDesc || '--' }}
+                      {{ paymentCallbackProcessLabel(item.processStatus, item.processStatusDesc) }}
                     </a-tag>
                     <a-tag v-if="item.errorMessage" color="red">{{ item.errorMessage }}</a-tag>
                     <a-button

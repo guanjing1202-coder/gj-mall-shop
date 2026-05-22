@@ -66,7 +66,7 @@ public class AdminPaymentCallbackVO {
     private static String processStatusDesc(Integer status) {
         if (Integer.valueOf(0).equals(status)) return "已接收";
         if (Integer.valueOf(1).equals(status)) return "已处理";
-        if (Integer.valueOf(2).equals(status)) return "幂等忽略";
+        if (Integer.valueOf(2).equals(status)) return "已忽略";
         if (Integer.valueOf(3).equals(status)) return "处理失败";
         return "未知";
     }

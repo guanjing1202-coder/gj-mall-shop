@@ -17,6 +17,7 @@ import com.gj.mall.pay.config.PayCallbackProperties;
 import com.gj.mall.pay.dto.PayDTO;
 import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.strategy.PayStrategy;
+import com.gj.mall.pay.support.PayCallbackEventSupport;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.pay.vo.PayCallbackResultVO;
 import com.gj.mall.pay.vo.PayResultVO;
@@ -45,6 +46,7 @@ public class PayServiceImpl implements PayService {
     private final PayCallbackRecordMapper callbackRecordMapper;
     private final PayCallbackProperties callbackProperties;
     private final PayCallbackSignatureSupport signatureSupport;
+    private final PayCallbackEventSupport eventSupport;
     private final ObjectMapper objectMapper;
     private final PlatformTransactionManager transactionManager;
 
@@ -218,6 +220,11 @@ public class PayServiceImpl implements PayService {
                 result.setProcessed(false);
                 result.setDuplicate(true);
                 result.setMessage("支付流水已退款，回调已忽略");
+            } else if (!eventSupport.isPaidEvent(payChannel, eventType)) {
+                callbackRecord.setProcessStatus(2);
+                result.setProcessed(false);
+                result.setDuplicate(false);
+                result.setMessage("非支付成功事件，回调已记录但未入账");
             } else {
                 doMarkPaid(record, record.getChannel(), callbackRecord.getThirdPayNo(), appendCallback(record.getCallbackData(),
                         "channel-callback callbackNo=" + callbackRecord.getCallbackNo()

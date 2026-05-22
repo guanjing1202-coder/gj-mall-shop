@@ -8,6 +8,7 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.pay.config.PayCallbackProperties;
+import com.gj.mall.pay.support.PayCallbackEventSupport;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.pay.strategy.PayStrategy;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,8 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.math.BigDecimal;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -63,6 +66,7 @@ class PayServiceImplTest {
                 callbackRecordMapper,
                 new PayCallbackProperties(),
                 new PayCallbackSignatureSupport(),
+                new PayCallbackEventSupport(),
                 new ObjectMapper(),
                 transactionManager);
 
@@ -102,6 +106,7 @@ class PayServiceImplTest {
                 callbackRecordMapper,
                 new PayCallbackProperties(),
                 new PayCallbackSignatureSupport(),
+                new PayCallbackEventSupport(),
                 new ObjectMapper(),
                 transactionManager);
 
@@ -115,6 +120,35 @@ class PayServiceImplTest {
         verify(callbackRecordMapper, never()).insert(any(PayCallbackRecord.class));
         verify(callbackRecordMapper, never()).updateById(any(PayCallbackRecord.class));
         verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
+    }
+
+    @Test
+    void handleCallbackIgnoresNonPaidEventWithoutMarkingOrderPaid() {
+        OrderService orderService = mock(OrderService.class);
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayServiceImpl service = new PayServiceImpl(
+                Collections.<PayStrategy>emptyList(),
+                orderService,
+                recordMapper,
+                callbackRecordMapper,
+                new PayCallbackProperties(),
+                new PayCallbackSignatureSupport(),
+                new PayCallbackEventSupport(),
+                new ObjectMapper(),
+                transactionManager);
+
+        PayPaymentRecord payment = pendingPayment();
+        payment.setChannel(1);
+        when(recordMapper.selectOne(any())).thenReturn(payment);
+
+        service.handleCallback("wechat", callbackPayload("NOTPAY"), Collections.emptyMap());
+
+        verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
+        verify(orderService, never()).markPaid(any(), any());
+        verify(callbackRecordMapper).insert(argThat(callback ->
+                Integer.valueOf(2).equals(callback.getProcessStatus())
+                        && "NOTPAY".equals(callback.getEventType())));
     }
 
     private PayCallbackRecord failedCallback() {
@@ -149,5 +183,15 @@ class PayServiceImplTest {
         payment.setAmount(new BigDecimal("99.00"));
         payment.setStatus(0);
         return payment;
+    }
+
+    private Map<String, Object> callbackPayload(String eventType) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("payNo", "P202605210001");
+        payload.put("thirdPayNo", "MOCK-P202605210001");
+        payload.put("notifyId", "N202605210001");
+        payload.put("eventType", eventType);
+        payload.put("amount", "99.00");
+        return payload;
     }
 }
