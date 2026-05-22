@@ -24,6 +24,7 @@ import {
 } from '@/api/payment'
 import {
   canReplayPaymentCallback,
+  formatCallbackSignatureSample,
   paymentCallbackReplayReason,
 } from '@/utils/payment-callback-ui'
 
@@ -144,6 +145,12 @@ const healthCards = computed(() => [
 ])
 
 const visibleChannels = computed(() => (summary.value.channels || []).filter((item) => Number(item.count || 0) > 0))
+
+const signatureSampleLines = computed(() => formatCallbackSignatureSample({
+  canonicalPayload: access.value.devSignaturePayload,
+  signatureHeader: access.value.devSignatureHeader,
+  signature: access.value.devSignature,
+}))
 
 const callbackStatusCards = computed(() => {
   const handled = callbacks.value.filter((item) => item.processStatus === 1).length
@@ -547,6 +554,10 @@ function createEmptyAccess(): PaymentAccess {
     callbackRequireSignature: false,
     callbackPath: '/api/pay/callback/{channel}',
     devSignatureAlgorithm: 'HmacSHA256(sortedPayload, mall.pay.callback.secret)',
+    devSignatureHeader: 'x-gj-pay-signature',
+    devSignaturePayload: '',
+    devSignature: '',
+    devCallbackExample: '',
     channels: [],
   }
 }
@@ -624,6 +635,18 @@ function signatureStatusColor(status?: number) {
           <small>真实微信/支付宝 SDK 接入后，这里会记录每次异步通知的验签和处理结果。</small>
         </div>
       </div>
+
+      <section class="signature-sample">
+        <div class="signature-sample__head">
+          <span>开发回调签名样例</span>
+          <strong>{{ access.devSignatureHeader || 'x-gj-pay-signature' }}</strong>
+        </div>
+        <div class="signature-sample__body">
+          <code v-for="line in signatureSampleLines" :key="line">{{ line }}</code>
+          <code v-if="access.devCallbackExample">请求体：{{ access.devCallbackExample }}</code>
+          <small>本样例用于 Mock/开发联调；真实支付接入后以微信、支付宝 SDK 验签结果为准。</small>
+        </div>
+      </section>
     </a-spin>
 
     <a-form layout="inline" style="margin-bottom: 16px; row-gap: 12px">
@@ -978,6 +1001,49 @@ function signatureStatusColor(status?: number) {
   margin-bottom: 18px;
 }
 
+.signature-sample {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.signature-sample__head span,
+.signature-sample__body small {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.signature-sample__head strong {
+  display: block;
+  margin-top: 6px;
+  color: #111827;
+}
+
+.signature-sample__body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.signature-sample__body code {
+  display: block;
+  max-width: 100%;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
 .callback-card,
 .callback-tip {
   min-height: 78px;
@@ -1179,7 +1245,8 @@ function signatureStatusColor(status?: number) {
   }
 
   .access-panel,
-  .callback-health {
+  .callback-health,
+  .signature-sample {
     grid-template-columns: 1fr;
   }
 }

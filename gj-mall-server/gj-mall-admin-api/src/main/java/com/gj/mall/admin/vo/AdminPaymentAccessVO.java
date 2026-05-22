@@ -11,6 +11,10 @@ public class AdminPaymentAccessVO {
     private Boolean callbackRequireSignature;
     private String callbackPath;
     private String devSignatureAlgorithm;
+    private String devSignatureHeader;
+    private String devSignaturePayload;
+    private String devSignature;
+    private String devCallbackExample;
     private List<ChannelItem> channels = new ArrayList<>();
 
     @Data

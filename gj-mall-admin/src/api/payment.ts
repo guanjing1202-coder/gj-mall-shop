@@ -113,6 +113,10 @@ export interface PaymentAccess {
   callbackRequireSignature: boolean
   callbackPath: string
   devSignatureAlgorithm: string
+  devSignatureHeader?: string
+  devSignaturePayload?: string
+  devSignature?: string
+  devCallbackExample?: string
   channels: PaymentAccessChannel[]
 }
 

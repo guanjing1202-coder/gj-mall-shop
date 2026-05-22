@@ -8,6 +8,7 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.pay.config.PayCallbackProperties;
+import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.pay.strategy.PayStrategy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,6 +62,7 @@ class PayServiceImplTest {
                 recordMapper,
                 callbackRecordMapper,
                 new PayCallbackProperties(),
+                new PayCallbackSignatureSupport(),
                 new ObjectMapper(),
                 transactionManager);
 
@@ -99,6 +101,7 @@ class PayServiceImplTest {
                 recordMapper,
                 callbackRecordMapper,
                 new PayCallbackProperties(),
+                new PayCallbackSignatureSupport(),
                 new ObjectMapper(),
                 transactionManager);
 

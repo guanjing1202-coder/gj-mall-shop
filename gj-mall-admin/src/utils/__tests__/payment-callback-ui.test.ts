@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import {
   canReplayPaymentCallback,
+  formatCallbackSignatureSample,
   paymentCallbackReplayReason,
 } from '../payment-callback-ui.ts'
 
@@ -18,5 +19,18 @@ describe('payment-callback-ui', () => {
     assert.equal(paymentCallbackReplayReason({ processStatus: 3, signatureStatus: 2 }), '验签失败回调不可重放')
     assert.equal(paymentCallbackReplayReason({ processStatus: 1, signatureStatus: 1 }), '仅处理失败的回调可重放')
     assert.equal(paymentCallbackReplayReason({ processStatus: 3, signatureStatus: 1 }), '')
+  })
+
+  it('formats callback signature sample for operations panel', () => {
+    const sample = formatCallbackSignatureSample({
+      canonicalPayload: 'amount=99.00&payNo=P1',
+      signatureHeader: 'x-gj-pay-signature',
+      signature: 'abc123',
+    })
+
+    assert.deepEqual(sample, [
+      '签名原文：amount=99.00&payNo=P1',
+      '请求头：x-gj-pay-signature: abc123',
+    ])
   })
 })

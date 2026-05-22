@@ -27,7 +27,9 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.mapper.PayRefundRecordMapper;
 import com.gj.mall.order.service.OrderService;
+import com.gj.mall.pay.config.PayCallbackProperties;
 import com.gj.mall.pay.service.PayService;
+import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +55,8 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
     private final UmsUserMapper userMapper;
     private final OrderService orderService;
     private final PayService payService;
+    private final PayCallbackSignatureSupport signatureSupport;
+    private final PayCallbackProperties callbackProperties;
 
     @Value("${mall.pay.mode:mock}")
     private String payMode;
@@ -92,6 +96,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         vo.setCallbackRequireSignature(Boolean.TRUE.equals(requireSignature));
         vo.setCallbackPath("/api/pay/callback/{channel}");
         vo.setDevSignatureAlgorithm("HmacSHA256(sortedPayload, mall.pay.callback.secret)");
+        fillDevSignatureSample(vo);
         boolean realMode = "real".equalsIgnoreCase(payMode);
         vo.getChannels().add(AdminPaymentAccessVO.ChannelItem.of(
                 PayChannel.MOCK.getCode(), PayChannel.MOCK.getName(), PayChannel.MOCK.getDesc(), true, "开发环境即时成功"));
@@ -489,5 +494,19 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         String tail = String.format("%04d", userId == null ? 0 : userId % 10000);
         String rnd = String.format("%04d", new Random().nextInt(10000));
         return "RF" + ts + tail + rnd;
+    }
+
+    private void fillDevSignatureSample(AdminPaymentAccessVO vo) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("amount", "99.00");
+        payload.put("eventType", "SUCCESS");
+        payload.put("notifyId", "N202605220001");
+        payload.put("payNo", "P202605220001");
+        payload.put("thirdPayNo", "MOCK-P202605220001");
+        String signature = signatureSupport.sign(payload, callbackProperties.getSecret());
+        vo.setDevSignatureHeader("x-gj-pay-signature");
+        vo.setDevSignaturePayload(signatureSupport.canonicalPayload(payload));
+        vo.setDevSignature(signature);
+        vo.setDevCallbackExample("{\"payNo\":\"P202605220001\",\"thirdPayNo\":\"MOCK-P202605220001\",\"notifyId\":\"N202605220001\",\"eventType\":\"SUCCESS\",\"amount\":\"99.00\"}");
     }
 }

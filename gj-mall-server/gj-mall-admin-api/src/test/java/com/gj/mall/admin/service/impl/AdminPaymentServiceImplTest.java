@@ -9,7 +9,10 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.mapper.PayRefundRecordMapper;
 import com.gj.mall.order.service.OrderService;
+import com.gj.mall.pay.config.PayCallbackProperties;
 import com.gj.mall.pay.service.PayService;
+import com.gj.mall.pay.support.PayCallbackSignatureSupport;
+import com.gj.mall.admin.vo.AdminPaymentAccessVO;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import org.junit.jupiter.api.Test;
 
@@ -43,7 +46,9 @@ class AdminPaymentServiceImplTest {
                 orderMapper,
                 userMapper,
                 orderService,
-                payService);
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
 
         PayRefundRecord refund = failedRefund();
         PayPaymentRecord payment = paidPayment();
@@ -83,7 +88,9 @@ class AdminPaymentServiceImplTest {
                 orderMapper,
                 userMapper,
                 orderService,
-                payService);
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
 
         PayRefundRecord refund = failedRefund();
         refund.setStatus(1);
@@ -113,7 +120,9 @@ class AdminPaymentServiceImplTest {
                 orderMapper,
                 userMapper,
                 orderService,
-                payService);
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
 
         PayRefundRecord refund = failedRefund();
         refund.setStatus(0);
@@ -147,11 +156,41 @@ class AdminPaymentServiceImplTest {
                 orderMapper,
                 userMapper,
                 orderService,
-                payService);
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
 
         service.replayCallback(88L);
 
         verify(payService).replayCallback(88L);
+    }
+
+    @Test
+    void accessIncludesDevelopmentSignatureSample() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
+
+        AdminPaymentAccessVO access = service.access();
+
+        assertTrue(access.getDevSignaturePayload().contains("payNo=P202605220001"));
+        assertTrue(access.getDevSignatureHeader().contains("x-gj-pay-signature"));
+        assertTrue(access.getDevSignature().length() >= 32);
+        assertTrue(access.getDevCallbackExample().contains("P202605220001"));
     }
 
     private PayRefundRecord failedRefund() {
