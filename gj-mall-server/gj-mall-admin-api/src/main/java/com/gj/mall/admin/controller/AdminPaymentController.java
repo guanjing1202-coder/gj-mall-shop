@@ -78,6 +78,13 @@ public class AdminPaymentController {
         return Result.success();
     }
 
+    @Operation(summary = "根据成功回调同步支付状态")
+    @PutMapping("/{id}/sync-status")
+    public Result<Void> syncStatus(@PathVariable Long id) {
+        paymentService.syncStatus(id);
+        return Result.success();
+    }
+
     @Operation(summary = "全额退款")
     @PostMapping("/{id}/refund")
     public Result<Void> refund(@PathVariable Long id, @RequestBody(required = false) AdminPaymentRefundDTO dto) {

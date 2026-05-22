@@ -15,6 +15,7 @@ import {
   refundPayment,
   replayCallback,
   retryRefund,
+  syncPaymentStatus,
   type ApiId,
   type PaymentAccess,
   type PaymentCallbackRecord,
@@ -28,6 +29,7 @@ import {
   paymentCallbackProcessLabel,
   paymentCallbackReplayReason,
 } from '@/utils/payment-callback-ui'
+import { canSyncPaymentStatus } from '@/utils/payment-action-ui'
 
 const route = useRoute()
 const loading = ref(false)
@@ -312,6 +314,26 @@ function handleMarkFailed(record: PaymentRecord) {
   })
 }
 
+function handleSyncStatus(record: PaymentRecord) {
+  Modal.confirm({
+    title: '确认同步支付状态吗？',
+    content: `将根据已记录的成功渠道回调同步支付流水：${record.payNo}`,
+    async onOk() {
+      actionId.value = record.id
+      try {
+        await syncPaymentStatus(record.id)
+        message.success('支付状态已同步')
+        await fetchSummary()
+        await fetchPayments()
+        await refreshCurrentPayment(record.id)
+        await fetchCallbacks(record.payNo)
+      } finally {
+        actionId.value = undefined
+      }
+    },
+  })
+}
+
 function openRefund(record: PaymentRecord) {
   refundTarget.value = record
   refundForm.amount = record.amount
@@ -480,6 +502,10 @@ function normalizeId(value?: ApiId) {
 
 function canMarkPaid(record: PaymentRecord) {
   return record.status === 0 || record.status === 2
+}
+
+function canSyncStatus(record: PaymentRecord) {
+  return canSyncPaymentStatus(record)
 }
 
 function canMarkFailed(record: PaymentRecord) {
@@ -748,6 +774,15 @@ function signatureStatusColor(status?: number) {
         <template v-else-if="column.key === 'action'">
           <a-space>
             <a-button type="link" size="small" @click="handleView(toPayment(record))">查看</a-button>
+            <a-button
+              v-if="canSyncStatus(toPayment(record))"
+              type="link"
+              size="small"
+              :loading="actionId === record.id"
+              @click="handleSyncStatus(toPayment(record))"
+            >
+              同步状态
+            </a-button>
             <a-button
               v-if="canMarkPaid(toPayment(record))"
               type="link"

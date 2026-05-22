@@ -193,6 +193,10 @@ export function markPaymentFailed(id: ApiId, reason?: string) {
   })
 }
 
+export function syncPaymentStatus(id: ApiId) {
+  return request.put<ApiResult<void>>(`/api/admin/payment/${id}/sync-status`)
+}
+
 export function refundPayment(id: ApiId, data: PaymentRefundPayload) {
   return request.post<ApiResult<void>>(`/api/admin/payment/${id}/refund`, data)
 }

@@ -205,6 +205,31 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void syncStatus(Long id) {
+        PayPaymentRecord record = getByIdOrThrow(id);
+        if (Integer.valueOf(1).equals(record.getStatus())) {
+            return;
+        }
+        if (Integer.valueOf(3).equals(record.getStatus())) {
+            throw new BizException(ResultCode.OPERATION_FORBIDDEN, "已退款记录不能同步支付状态");
+        }
+        PayCallbackRecord callback = latestSuccessfulCallback(record);
+        if (callback == null) {
+            throw new BizException(ResultCode.PAY_FAIL, "未找到可入账的成功支付回调");
+        }
+        PayPaymentRecord update = new PayPaymentRecord();
+        update.setId(record.getId());
+        update.setStatus(1);
+        update.setThirdPayNo(StrUtil.blankToDefault(callback.getThirdPayNo(), record.getThirdPayNo()));
+        update.setPayTime(LocalDateTime.now());
+        update.setCallbackData(appendCallback(record.getCallbackData(),
+                "admin-sync-status callbackNo=" + callback.getCallbackNo()));
+        recordMapper.updateById(update);
+        orderService.markPaid(record.getOrderId(), record.getChannel());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void refund(Long id, AdminPaymentRefundDTO dto) {
         PayPaymentRecord record = getByIdOrThrow(id);
         if (!Integer.valueOf(1).equals(record.getStatus())) {
@@ -337,6 +362,17 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
             throw new BizException(ResultCode.PAY_RECORD_NOT_FOUND, "退款记录不存在");
         }
         return record;
+    }
+
+    private PayCallbackRecord latestSuccessfulCallback(PayPaymentRecord record) {
+        List<PayCallbackRecord> callbacks = callbackRecordMapper.selectList(Wrappers.<PayCallbackRecord>lambdaQuery()
+                .eq(PayCallbackRecord::getPayNo, record.getPayNo())
+                .eq(PayCallbackRecord::getChannel, record.getChannel())
+                .eq(PayCallbackRecord::getProcessStatus, 1)
+                .in(PayCallbackRecord::getSignatureStatus, 0, 1)
+                .orderByDesc(PayCallbackRecord::getCreateTime)
+                .last("LIMIT 1"));
+        return CollUtil.isEmpty(callbacks) ? null : callbacks.get(0);
     }
 
     private Long countByStatus(Integer status) {
