@@ -338,6 +338,77 @@ class AdminPaymentServiceImplTest {
         assertEquals("未找到可入账的成功支付回调", detail.getSyncStatusReason());
     }
 
+    @Test
+    void detailMarksPaidPaymentRefundableWhenNoRefundExists() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
+
+        PayPaymentRecord payment = paidPayment();
+        OmsOrder order = paidOrder();
+        order.setStatus(1);
+        when(recordMapper.selectById(payment.getId())).thenReturn(payment);
+        when(orderMapper.selectList(any())).thenReturn(Collections.singletonList(order));
+        when(userMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(refundRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(callbackRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        AdminPaymentVO detail = service.detail(payment.getId());
+
+        assertTrue(detail.getRefundAllowed());
+        assertEquals("已支付且未生成退款记录，可发起全额退款", detail.getRefundReason());
+    }
+
+    @Test
+    void detailExplainsRefundBlockedByExistingRefundRecord() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
+
+        PayPaymentRecord payment = paidPayment();
+        OmsOrder order = paidOrder();
+        PayRefundRecord refund = failedRefund();
+        refund.setStatus(0);
+        when(recordMapper.selectById(payment.getId())).thenReturn(payment);
+        when(orderMapper.selectList(any())).thenReturn(Collections.singletonList(order));
+        when(userMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(refundRecordMapper.selectList(any())).thenReturn(Collections.singletonList(refund));
+        when(callbackRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        AdminPaymentVO detail = service.detail(payment.getId());
+
+        assertFalse(detail.getRefundAllowed());
+        assertEquals("退款记录已存在，请在退款记录中处理", detail.getRefundReason());
+    }
+
     private PayRefundRecord failedRefund() {
         PayRefundRecord refund = new PayRefundRecord();
         refund.setId(900L);

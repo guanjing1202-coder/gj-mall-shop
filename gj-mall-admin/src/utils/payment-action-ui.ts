@@ -4,6 +4,9 @@ export interface PaymentActionState {
   syncStatusReason?: string
   syncCallbackNo?: string
   syncThirdPayNo?: string
+  orderStatus?: number
+  refundAllowed?: boolean
+  refundReason?: string
   refundRecord?: unknown
 }
 
@@ -22,4 +25,15 @@ export function paymentSyncStatusHint(record?: PaymentActionState) {
     return `依据回调 ${record.syncCallbackNo}${record.syncThirdPayNo ? ` / ${record.syncThirdPayNo}` : ''}`
   }
   return record.syncStatusReason || ''
+}
+
+export function canRefundPayment(record?: PaymentActionState) {
+  if (!record || record.status !== 1 || record.orderStatus === 6 || record.refundRecord) {
+    return false
+  }
+  return record.refundAllowed ?? true
+}
+
+export function paymentRefundHint(record?: PaymentActionState) {
+  return record?.refundReason || ''
 }

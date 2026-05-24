@@ -42,6 +42,8 @@ public class AdminPaymentVO {
     private String syncCallbackNo;
     private String syncThirdPayNo;
     private LocalDateTime syncCallbackTime;
+    private Boolean refundAllowed;
+    private String refundReason;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 

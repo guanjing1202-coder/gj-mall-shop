@@ -29,7 +29,7 @@ import {
   paymentCallbackProcessLabel,
   paymentCallbackReplayReason,
 } from '@/utils/payment-callback-ui'
-import { canSyncPaymentStatus, paymentSyncStatusHint } from '@/utils/payment-action-ui'
+import { canRefundPayment, canSyncPaymentStatus, paymentRefundHint, paymentSyncStatusHint } from '@/utils/payment-action-ui'
 
 const route = useRoute()
 const loading = ref(false)
@@ -517,7 +517,11 @@ function canMarkFailed(record: PaymentRecord) {
 }
 
 function canRefund(record: PaymentRecord) {
-  return record.status === 1 && record.orderStatus !== 6 && !record.refundRecord
+  return canRefundPayment(record)
+}
+
+function refundHint(record?: PaymentRecord) {
+  return paymentRefundHint(record)
 }
 
 function canRetryRefund(record: PaymentRecord) {
@@ -870,6 +874,14 @@ function signatureStatusColor(status?: number) {
               <span>{{ currentPayment.syncThirdPayNo || '暂无第三方流水' }}</span>
               <small>{{ currentPayment.syncCallbackTime || '--' }}</small>
             </div>
+          </a-descriptions-item>
+          <a-descriptions-item label="退款资格" :span="2">
+            <a-space wrap>
+              <a-tag :color="currentPayment.refundAllowed ? 'green' : 'default'">
+                {{ currentPayment.refundAllowed ? '可退款' : '不可退款' }}
+              </a-tag>
+              <span>{{ refundHint(currentPayment) || '--' }}</span>
+            </a-space>
           </a-descriptions-item>
         </a-descriptions>
 

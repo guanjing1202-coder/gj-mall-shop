@@ -504,9 +504,41 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
                 .map(item -> {
                     AdminPaymentVO vo = AdminPaymentVO.from(item, orderMap.get(item.getOrderId()), userMap.get(item.getUserId()), refundMap.get(item.getId()));
                     fillSyncStatus(vo, item, syncCallbackMap.get(item.getId()));
+                    fillRefundStatus(vo, item, orderMap.get(item.getOrderId()), refundMap.get(item.getId()));
                     return vo;
                 })
                 .collect(Collectors.toList());
+    }
+
+    private void fillRefundStatus(AdminPaymentVO vo, PayPaymentRecord record, OmsOrder order, PayRefundRecord refundRecord) {
+        if (!Integer.valueOf(1).equals(record.getStatus())) {
+            vo.setRefundAllowed(false);
+            vo.setRefundReason("仅已支付流水可发起退款");
+            return;
+        }
+        if (refundRecord != null) {
+            vo.setRefundAllowed(false);
+            vo.setRefundReason("退款记录已存在，请在退款记录中处理");
+            return;
+        }
+        if (order == null) {
+            vo.setRefundAllowed(false);
+            vo.setRefundReason("订单不存在，无法发起退款");
+            return;
+        }
+        if (OrderStatus.CANCELED.getCode().equals(order.getStatus())
+                || OrderStatus.PENDING_PAY.getCode().equals(order.getStatus())) {
+            vo.setRefundAllowed(false);
+            vo.setRefundReason("当前订单状态不可退款");
+            return;
+        }
+        if (OrderStatus.REFUNDED.getCode().equals(order.getStatus())) {
+            vo.setRefundAllowed(false);
+            vo.setRefundReason("订单已退款");
+            return;
+        }
+        vo.setRefundAllowed(true);
+        vo.setRefundReason("已支付且未生成退款记录，可发起全额退款");
     }
 
     private void fillSyncStatus(AdminPaymentVO vo, PayPaymentRecord record, PayCallbackRecord callback) {

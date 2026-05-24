@@ -53,6 +53,8 @@ export interface PaymentRecord {
   syncCallbackNo?: string
   syncThirdPayNo?: string
   syncCallbackTime?: string
+  refundAllowed?: boolean
+  refundReason?: string
   createTime?: string
   updateTime?: string
 }
