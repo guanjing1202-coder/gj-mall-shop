@@ -36,6 +36,12 @@ public class AdminPaymentVO {
     private BigDecimal orderPayAmount;
     private LocalDateTime orderPayTime;
     private AdminRefundRecordVO refundRecord;
+    private Boolean syncStatusAllowed;
+    private String syncStatusReason;
+    private Long syncCallbackId;
+    private String syncCallbackNo;
+    private String syncThirdPayNo;
+    private LocalDateTime syncCallbackTime;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 

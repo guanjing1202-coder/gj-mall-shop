@@ -29,7 +29,7 @@ import {
   paymentCallbackProcessLabel,
   paymentCallbackReplayReason,
 } from '@/utils/payment-callback-ui'
-import { canSyncPaymentStatus } from '@/utils/payment-action-ui'
+import { canSyncPaymentStatus, paymentSyncStatusHint } from '@/utils/payment-action-ui'
 
 const route = useRoute()
 const loading = ref(false)
@@ -508,6 +508,10 @@ function canSyncStatus(record: PaymentRecord) {
   return canSyncPaymentStatus(record)
 }
 
+function syncStatusHint(record?: PaymentRecord) {
+  return paymentSyncStatusHint(record)
+}
+
 function canMarkFailed(record: PaymentRecord) {
   return record.status === 0
 }
@@ -759,6 +763,9 @@ function signatureStatusColor(status?: number) {
           <a-tag :color="paymentStatusColor(record.status)">
             {{ record.statusDesc || '--' }}
           </a-tag>
+          <div v-if="record.status === 0 || record.status === 2" class="sync-status-hint">
+            {{ syncStatusHint(toPayment(record)) || '等待渠道回调' }}
+          </div>
         </template>
 
         <template v-else-if="column.key === 'orderStatus'">
@@ -849,6 +856,21 @@ function signatureStatusColor(status?: number) {
           </a-descriptions-item>
           <a-descriptions-item label="支付时间">{{ currentPayment.payTime || '--' }}</a-descriptions-item>
           <a-descriptions-item label="创建时间">{{ currentPayment.createTime || '--' }}</a-descriptions-item>
+          <a-descriptions-item label="同步资格" :span="2">
+            <a-space wrap>
+              <a-tag :color="currentPayment.syncStatusAllowed ? 'green' : 'default'">
+                {{ currentPayment.syncStatusAllowed ? '可同步' : '不可同步' }}
+              </a-tag>
+              <span>{{ currentPayment.syncStatusReason || '--' }}</span>
+            </a-space>
+          </a-descriptions-item>
+          <a-descriptions-item v-if="currentPayment.syncCallbackNo" label="同步依据" :span="2">
+            <div class="sync-basis">
+              <strong>{{ currentPayment.syncCallbackNo }}</strong>
+              <span>{{ currentPayment.syncThirdPayNo || '暂无第三方流水' }}</span>
+              <small>{{ currentPayment.syncCallbackTime || '--' }}</small>
+            </div>
+          </a-descriptions-item>
         </a-descriptions>
 
         <div style="margin-top: 20px">
@@ -947,6 +969,14 @@ function signatureStatusColor(status?: number) {
 
         <div style="margin-top: 20px; display: flex; justify-content: flex-end">
           <a-space>
+            <a-button
+              v-if="canSyncStatus(currentPayment)"
+              type="primary"
+              :loading="actionId === currentPayment.id"
+              @click="handleSyncStatus(currentPayment)"
+            >
+              按成功回调同步
+            </a-button>
             <a-button
               v-if="canMarkPaid(currentPayment)"
               :loading="actionId === currentPayment.id"
@@ -1129,6 +1159,28 @@ function signatureStatusColor(status?: number) {
 .callback-line p {
   margin: 8px 0;
   color: #475569;
+}
+
+.sync-status-hint {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sync-basis {
+  display: grid;
+  gap: 4px;
+}
+
+.sync-basis strong {
+  color: #111827;
+  word-break: break-all;
+}
+
+.sync-basis span,
+.sync-basis small {
+  color: #64748b;
 }
 
 .refund-record-card {

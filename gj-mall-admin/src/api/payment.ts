@@ -47,6 +47,12 @@ export interface PaymentRecord {
   orderPayAmount?: number
   orderPayTime?: string
   refundRecord?: RefundRecord
+  syncStatusAllowed?: boolean
+  syncStatusReason?: string
+  syncCallbackId?: ApiId
+  syncCallbackNo?: string
+  syncThirdPayNo?: string
+  syncCallbackTime?: string
   createTime?: string
   updateTime?: string
 }

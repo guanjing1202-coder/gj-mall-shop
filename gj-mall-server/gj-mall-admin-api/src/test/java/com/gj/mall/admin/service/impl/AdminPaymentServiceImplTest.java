@@ -14,6 +14,7 @@ import com.gj.mall.pay.config.PayCallbackProperties;
 import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.admin.vo.AdminPaymentAccessVO;
+import com.gj.mall.admin.vo.AdminPaymentVO;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collections;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -261,6 +265,77 @@ class AdminPaymentServiceImplTest {
         assertTrue(error.getMessage().contains("未找到可入账的成功支付回调"));
         verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
         verify(orderService, never()).markPaid(any(), any());
+    }
+
+    @Test
+    void detailIncludesSyncStatusBasisWhenSuccessfulCallbackExists() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
+
+        PayPaymentRecord payment = pendingWechatPayment();
+        PayCallbackRecord callback = successfulCallback(payment);
+        when(recordMapper.selectById(payment.getId())).thenReturn(payment);
+        when(orderMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(userMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(refundRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(callbackRecordMapper.selectList(any())).thenReturn(Collections.singletonList(callback));
+
+        AdminPaymentVO detail = service.detail(payment.getId());
+
+        assertTrue(detail.getSyncStatusAllowed());
+        assertEquals("发现成功回调，可同步支付状态", detail.getSyncStatusReason());
+        assertEquals(callback.getId(), detail.getSyncCallbackId());
+        assertEquals(callback.getCallbackNo(), detail.getSyncCallbackNo());
+        assertEquals(callback.getThirdPayNo(), detail.getSyncThirdPayNo());
+        assertNotNull(detail.getSyncCallbackTime());
+    }
+
+    @Test
+    void detailMarksUnsettledPaymentNotSyncableWithoutSuccessfulCallback() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties());
+
+        PayPaymentRecord payment = pendingWechatPayment();
+        when(recordMapper.selectById(payment.getId())).thenReturn(payment);
+        when(orderMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(userMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(refundRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(callbackRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        AdminPaymentVO detail = service.detail(payment.getId());
+
+        assertFalse(detail.getSyncStatusAllowed());
+        assertEquals("未找到可入账的成功支付回调", detail.getSyncStatusReason());
     }
 
     private PayRefundRecord failedRefund() {

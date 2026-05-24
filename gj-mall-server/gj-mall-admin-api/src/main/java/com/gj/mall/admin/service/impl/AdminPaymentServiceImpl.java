@@ -498,10 +498,73 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
                         .stream()
                         .collect(Collectors.toMap(UmsUser::getId, item -> item, (a, b) -> a));
         Map<Long, PayRefundRecord> refundMap = refundRecordMap(records);
+        Map<Long, PayCallbackRecord> syncCallbackMap = syncCallbackMap(records);
 
         return records.stream()
-                .map(item -> AdminPaymentVO.from(item, orderMap.get(item.getOrderId()), userMap.get(item.getUserId()), refundMap.get(item.getId())))
+                .map(item -> {
+                    AdminPaymentVO vo = AdminPaymentVO.from(item, orderMap.get(item.getOrderId()), userMap.get(item.getUserId()), refundMap.get(item.getId()));
+                    fillSyncStatus(vo, item, syncCallbackMap.get(item.getId()));
+                    return vo;
+                })
                 .collect(Collectors.toList());
+    }
+
+    private void fillSyncStatus(AdminPaymentVO vo, PayPaymentRecord record, PayCallbackRecord callback) {
+        if (Integer.valueOf(1).equals(record.getStatus())) {
+            vo.setSyncStatusAllowed(false);
+            vo.setSyncStatusReason("支付流水已入账");
+            return;
+        }
+        if (Integer.valueOf(3).equals(record.getStatus())) {
+            vo.setSyncStatusAllowed(false);
+            vo.setSyncStatusReason("已退款记录不能同步支付状态");
+            return;
+        }
+        if (callback == null) {
+            vo.setSyncStatusAllowed(false);
+            vo.setSyncStatusReason("未找到可入账的成功支付回调");
+            return;
+        }
+        vo.setSyncStatusAllowed(true);
+        vo.setSyncStatusReason("发现成功回调，可同步支付状态");
+        vo.setSyncCallbackId(callback.getId());
+        vo.setSyncCallbackNo(callback.getCallbackNo());
+        vo.setSyncThirdPayNo(callback.getThirdPayNo());
+        vo.setSyncCallbackTime(callback.getCreateTime());
+    }
+
+    private Map<Long, PayCallbackRecord> syncCallbackMap(List<PayPaymentRecord> records) {
+        Map<Long, PayPaymentRecord> paymentMap = records.stream()
+                .filter(item -> item.getId() != null)
+                .collect(Collectors.toMap(PayPaymentRecord::getId, item -> item, (a, b) -> a, LinkedHashMap::new));
+        if (paymentMap.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<String> payNos = records.stream()
+                .map(PayPaymentRecord::getPayNo)
+                .filter(StrUtil::isNotBlank)
+                .distinct()
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(payNos)) {
+            return Collections.emptyMap();
+        }
+        List<PayCallbackRecord> callbacks = callbackRecordMapper.selectList(Wrappers.<PayCallbackRecord>lambdaQuery()
+                .in(PayCallbackRecord::getPayNo, payNos)
+                .eq(PayCallbackRecord::getProcessStatus, 1)
+                .in(PayCallbackRecord::getSignatureStatus, 0, 1)
+                .orderByDesc(PayCallbackRecord::getCreateTime));
+        if (CollUtil.isEmpty(callbacks)) {
+            return Collections.emptyMap();
+        }
+        Map<Long, PayCallbackRecord> result = new HashMap<>();
+        for (PayCallbackRecord callback : callbacks) {
+            records.stream()
+                    .filter(record -> Objects.equals(record.getPayNo(), callback.getPayNo())
+                            && Objects.equals(record.getChannel(), callback.getChannel()))
+                    .findFirst()
+                    .ifPresent(record -> result.putIfAbsent(record.getId(), callback));
+        }
+        return result;
     }
 
     private Map<Long, PayRefundRecord> refundRecordMap(List<PayPaymentRecord> records) {
