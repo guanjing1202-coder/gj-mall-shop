@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { canRefundPayment, canSyncPaymentStatus, paymentRefundHint, paymentSyncStatusHint } from '../payment-action-ui.ts'
+import {
+  canRefundPayment,
+  isFullRefundAmount,
+  canSyncPaymentStatus,
+  paymentRefundHint,
+  paymentSyncStatusHint,
+} from '../payment-action-ui.ts'
 
 describe('payment-action-ui', () => {
   it('allows payment status sync only for unsettled payments', () => {
@@ -41,5 +47,12 @@ describe('payment-action-ui', () => {
   it('formats payment refund hint from backend reason', () => {
     assert.equal(paymentRefundHint({ refundReason: '退款记录已存在，请在退款记录中处理' }), '退款记录已存在，请在退款记录中处理')
     assert.equal(paymentRefundHint({ status: 1, orderStatus: 1 }), '')
+  })
+
+  it('accepts only full refund amount with cent precision', () => {
+    assert.equal(isFullRefundAmount(88.88, 88.88), true)
+    assert.equal(isFullRefundAmount(88.880001, 88.88), true)
+    assert.equal(isFullRefundAmount(80, 88.88), false)
+    assert.equal(isFullRefundAmount(undefined, 88.88), false)
   })
 })

@@ -29,7 +29,13 @@ import {
   paymentCallbackProcessLabel,
   paymentCallbackReplayReason,
 } from '@/utils/payment-callback-ui'
-import { canRefundPayment, canSyncPaymentStatus, paymentRefundHint, paymentSyncStatusHint } from '@/utils/payment-action-ui'
+import {
+  canRefundPayment,
+  canSyncPaymentStatus,
+  isFullRefundAmount,
+  paymentRefundHint,
+  paymentSyncStatusHint,
+} from '@/utils/payment-action-ui'
 
 const route = useRoute()
 const loading = ref(false)
@@ -342,24 +348,29 @@ function openRefund(record: PaymentRecord) {
 }
 
 async function submitRefund() {
-  if (!refundTarget.value) {
+  const target = refundTarget.value
+  if (!target) {
     return
   }
-  if (!refundForm.amount || refundForm.amount <= 0) {
-    message.error('请输入退款金额')
+  if (!canRefund(target)) {
+    message.error(refundHint(target) || '当前支付流水不可退款')
+    return
+  }
+  if (!isFullRefundAmount(refundForm.amount, target.amount)) {
+    message.error('当前版本仅支持整笔全额退款，请刷新后重试')
     return
   }
   refundSaving.value = true
   try {
-    await refundPayment(refundTarget.value.id, {
-      amount: refundForm.amount,
+    await refundPayment(target.id, {
+      amount: target.amount,
       reason: refundForm.reason.trim() || undefined,
     })
     message.success('退款成功')
     refundOpen.value = false
     await fetchSummary()
     await fetchPayments()
-    await refreshCurrentPayment(refundTarget.value.id)
+    await refreshCurrentPayment(target.id)
   } finally {
     refundSaving.value = false
   }
@@ -1017,11 +1028,22 @@ function signatureStatusColor(status?: number) {
     @ok="submitRefund"
   >
     <a-form layout="vertical">
+      <a-alert
+        class="refund-confirm-alert"
+        type="warning"
+        show-icon
+        message="请确认该支付流水需要整笔退回"
+        description="当前后台退款入口仅支持全额退款；售后部分退款会在售后单处理链路中发起。"
+      />
       <a-form-item label="支付流水">
         <a-input :value="refundTarget?.payNo" disabled />
       </a-form-item>
       <a-form-item label="退款金额">
-        <a-input-number v-model:value="refundForm.amount" :min="0.01" style="width: 100%" />
+        <div class="refund-confirm-amount">
+          <span>原路退回金额</span>
+          <strong>{{ formatMoney(refundTarget?.amount) }}</strong>
+          <small>{{ refundHint(refundTarget) || '已支付且未生成退款记录，可发起全额退款' }}</small>
+        </div>
       </a-form-item>
       <a-form-item label="退款原因">
         <a-textarea v-model:value="refundForm.reason" :rows="4" placeholder="请输入退款原因" />
@@ -1239,6 +1261,31 @@ function signatureStatusColor(status?: number) {
   gap: 6px;
   padding-top: 12px;
   border-top: 1px solid #edf0f5;
+}
+
+.refund-confirm-alert {
+  margin-bottom: 16px;
+}
+
+.refund-confirm-amount {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid #fee2e2;
+  border-radius: 8px;
+  background: #fff8f8;
+}
+
+.refund-confirm-amount span,
+.refund-confirm-amount small {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.refund-confirm-amount strong {
+  color: #dc2626;
+  font-size: 28px;
+  line-height: 1.15;
 }
 
 .summary-card {

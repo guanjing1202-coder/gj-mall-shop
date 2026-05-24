@@ -37,3 +37,10 @@ export function canRefundPayment(record?: PaymentActionState) {
 export function paymentRefundHint(record?: PaymentActionState) {
   return record?.refundReason || ''
 }
+
+export function isFullRefundAmount(inputAmount?: number, paymentAmount?: number) {
+  if (inputAmount === undefined || inputAmount === null || paymentAmount === undefined || paymentAmount === null) {
+    return false
+  }
+  return Math.round(Number(inputAmount) * 100) === Math.round(Number(paymentAmount) * 100)
+}
