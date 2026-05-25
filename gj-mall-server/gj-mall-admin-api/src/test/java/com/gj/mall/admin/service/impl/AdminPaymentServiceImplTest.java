@@ -16,6 +16,7 @@ import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.admin.vo.AdminPaymentAccessVO;
 import com.gj.mall.admin.vo.AdminPaymentVO;
 import com.gj.mall.user.mapper.UmsUserMapper;
+import com.gj.mall.user.service.UserMessageService;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -37,6 +38,46 @@ import static org.mockito.Mockito.when;
 class AdminPaymentServiceImplTest {
 
     @Test
+    void refundSendsPaymentMessageToUser() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        UserMessageService messageService = mock(UserMessageService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackProperties(),
+                messageService);
+
+        PayPaymentRecord payment = paidPayment();
+        OmsOrder order = paidOrder();
+        when(recordMapper.selectById(payment.getId())).thenReturn(payment);
+        when(orderMapper.selectById(payment.getOrderId())).thenReturn(order);
+        when(refundRecordMapper.selectOne(any())).thenReturn(null);
+
+        service.refund(payment.getId(), null);
+
+        verify(messageService).create(
+                payment.getUserId(),
+                "payment",
+                "退款已完成",
+                "订单 " + payment.getOrderNo() + " 已完成退款，退款金额 ¥99.00。",
+                "order",
+                payment.getOrderId(),
+                payment.getOrderNo());
+    }
+
+    @Test
     void retryRefundSucceedsForFailedRefundRecord() {
         PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
         PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
@@ -54,7 +95,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayRefundRecord refund = failedRefund();
         PayPaymentRecord payment = paidPayment();
@@ -96,7 +138,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayRefundRecord refund = failedRefund();
         refund.setStatus(1);
@@ -128,7 +171,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayRefundRecord refund = failedRefund();
         refund.setStatus(0);
@@ -164,7 +208,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         service.replayCallback(88L);
 
@@ -189,7 +234,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         AdminPaymentAccessVO access = service.access();
 
@@ -217,7 +263,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayPaymentRecord payment = pendingWechatPayment();
         PayCallbackRecord callback = successfulCallback(payment);
@@ -254,7 +301,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayPaymentRecord payment = pendingWechatPayment();
         when(recordMapper.selectById(payment.getId())).thenReturn(payment);
@@ -285,7 +333,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayPaymentRecord payment = pendingWechatPayment();
         PayCallbackRecord callback = successfulCallback(payment);
@@ -323,7 +372,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayPaymentRecord payment = pendingWechatPayment();
         when(recordMapper.selectById(payment.getId())).thenReturn(payment);
@@ -356,7 +406,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayPaymentRecord payment = paidPayment();
         OmsOrder order = paidOrder();
@@ -391,7 +442,8 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties());
+                new PayCallbackProperties(),
+                mock(UserMessageService.class));
 
         PayPaymentRecord payment = paidPayment();
         OmsOrder order = paidOrder();

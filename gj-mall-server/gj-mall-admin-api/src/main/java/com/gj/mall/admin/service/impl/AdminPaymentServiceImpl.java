@@ -32,6 +32,7 @@ import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.mapper.UmsUserMapper;
+import com.gj.mall.user.service.UserMessageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -57,6 +58,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
     private final PayService payService;
     private final PayCallbackSignatureSupport signatureSupport;
     private final PayCallbackProperties callbackProperties;
+    private final UserMessageService messageService;
 
     @Value("${mall.pay.mode:mock}")
     private String payMode;
@@ -290,6 +292,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         orderUpdate.setId(order.getId());
         orderUpdate.setStatus(OrderStatus.REFUNDED.getCode());
         orderMapper.updateById(orderUpdate);
+        notifyRefundSuccess(record.getUserId(), record.getOrderId(), record.getOrderNo(), amount);
     }
 
     @Override
@@ -625,6 +628,16 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         String tail = String.format("%04d", userId == null ? 0 : userId % 10000);
         String rnd = String.format("%04d", new Random().nextInt(10000));
         return "RF" + ts + tail + rnd;
+    }
+
+    private void notifyRefundSuccess(Long userId, Long orderId, String orderNo, BigDecimal amount) {
+        try {
+            String refundAmount = amount == null ? "0.00" : amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+            messageService.create(userId, "payment", "退款已完成",
+                    "订单 " + orderNo + " 已完成退款，退款金额 ¥" + refundAmount + "。",
+                    "order", orderId, orderNo);
+        } catch (Exception ignored) {
+        }
     }
 
     private void fillDevSignatureSample(AdminPaymentAccessVO vo) {

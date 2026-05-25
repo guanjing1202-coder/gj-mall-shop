@@ -25,6 +25,22 @@ gj-mall-shop/
 | 移动端 | uni-app Vue 3、TypeScript、Pinia |
 | 数据与中间件 | MySQL 8、Redis、MongoDB、RabbitMQ |
 
+## 当前功能概览
+
+项目主链路已经覆盖一个商城从浏览、下单到履约、售后和后台运营的核心流程：
+
+| 模块 | 能力 |
+| --- | --- |
+| 商品与搜索 | 商品分类、品牌、SKU、库存、商品详情、搜索联想、移动端搜索适配 |
+| 购物车与结算 | 购物车管理、优惠券试算、运费展示、发票信息、PC/H5 下单 |
+| 订单履约 | 订单列表与详情、支付后履约、发货、物流提示、确认收货、订单状态流转 |
+| 支付退款 | Mock 支付、支付回调记录、回调签名样例、失败回调重放、支付状态同步、退款资格判断、全额退款确认、退款成功消息通知 |
+| 售后 | 用户申请售后、后台创建售后、审核、退货物流、确认收货、退款记录、售后资格校验 |
+| 营销 | 优惠券、秒杀活动、活动库存、后台营销管理 |
+| 消息中心 | 订单、物流、支付、售后消息，未读统计，全部已读，清空已读 |
+| 后台运营 | 商品、库存、订单、物流、售后、支付、报表、上传存储、系统配置、角色权限、操作日志 |
+| 多端适配 | PC 商城、管理后台、Uni H5，PC 商城已做移动浏览器响应式优化 |
+
 ## 本地环境
 
 当前本机已将项目依赖统一安装在 D 盘：
@@ -144,9 +160,9 @@ gj-mall-server/
 构建后端：
 
 ```powershell
-cd D:\CodexWorkspace\gj-mall-shop\gj-mall-server
+cd D:\caludeWorkspace\gj-mall-shop\gj-mall-server
 
-$root = 'D:\CodexWorkspace\gj-mall-shop'
+$root = 'D:\caludeWorkspace\gj-mall-shop'
 $jdk = Get-ChildItem "$root\.codex-tools\jdk8" -Directory | Select-Object -First 1
 $env:JAVA_HOME = $jdk.FullName
 $env:Path = "$env:JAVA_HOME\bin;$root\.codex-tools\apache-maven-3.9.9\bin;$env:Path"
@@ -157,7 +173,7 @@ mvn -DskipTests package
 手动启动后端：
 
 ```powershell
-cd D:\CodexWorkspace\gj-mall-shop\gj-mall-server\gj-mall-app
+cd D:\caludeWorkspace\gj-mall-shop\gj-mall-server\gj-mall-app
 java -jar target\gj-mall-app.jar
 ```
 
@@ -168,7 +184,7 @@ java -jar target\gj-mall-app.jar
 ### PC 商城
 
 ```powershell
-cd D:\CodexWorkspace\gj-mall-shop\gj-mall-web
+cd D:\caludeWorkspace\gj-mall-shop\gj-mall-web
 npm run dev
 npm run build
 ```
@@ -178,7 +194,7 @@ npm run build
 ### 管理后台
 
 ```powershell
-cd D:\CodexWorkspace\gj-mall-shop\gj-mall-admin
+cd D:\caludeWorkspace\gj-mall-shop\gj-mall-admin
 npm run dev
 npm run build
 ```
@@ -188,7 +204,7 @@ npm run build
 ### Uni H5 / 微信小程序
 
 ```powershell
-cd D:\CodexWorkspace\gj-mall-shop\gj-mall-uni
+cd D:\caludeWorkspace\gj-mall-shop\gj-mall-uni
 npm run dev:h5
 npm run build:h5
 npm run dev:mp-weixin
@@ -240,7 +256,9 @@ PayService
 └─ AlipayStrategy
 ```
 
-开发环境默认适合使用 Mock 支付。订单模块包含普通下单、秒杀下单、支付结果、售后申请、订单评价、物流查询等能力。库存和订单超时释放依赖 Redis 与 RabbitMQ。
+开发环境默认适合使用 Mock 支付。后台支付管理支持查看支付汇总、回调验签样例、最近渠道回调、失败回调重放、按成功回调同步支付状态、退款资格展示、全额退款确认和退款失败重试。后台直接全额退款成功后会写入用户消息中心，用户可在 PC/H5 消息中心看到“退款已完成”通知。
+
+订单模块包含普通下单、秒杀下单、支付结果、售后申请、订单评价、物流查询等能力。库存和订单超时释放依赖 Redis 与 RabbitMQ。
 
 ## 常见问题
 
