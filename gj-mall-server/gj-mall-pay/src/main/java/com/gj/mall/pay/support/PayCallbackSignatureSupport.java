@@ -2,13 +2,20 @@ package com.gj.mall.pay.support;
 
 import com.gj.mall.common.enums.ResultCode;
 import com.gj.mall.common.exception.BizException;
+import com.gj.mall.order.enums.PayChannel;
 import com.gj.mall.pay.config.PayCallbackProperties;
+import com.gj.mall.pay.config.PayRuntimeConfigService;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
 import java.security.MessageDigest;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -33,6 +40,17 @@ public class PayCallbackSignatureSupport {
                 expected.getBytes(StandardCharsets.UTF_8),
                 signature.trim().getBytes(StandardCharsets.UTF_8));
         return matched ? new Verification(1, "签名校验通过") : new Verification(2, "支付回调签名不匹配");
+    }
+
+    public Verification verify(PayChannel channel,
+                               Map<String, Object> payload,
+                               Map<String, String> headers,
+                               PayCallbackProperties properties,
+                               PayRuntimeConfigService runtimeConfigService) {
+        if (PayChannel.ALIPAY.equals(channel)) {
+            return verifyAlipay(payload, headers, properties, runtimeConfigService);
+        }
+        return verify(payload, headers, properties);
     }
 
     public String sign(Map<String, Object> payload, String secret) {
@@ -60,6 +78,62 @@ public class PayCallbackSignatureSupport {
                 .sorted(Map.Entry.comparingByKey())
                 .map(entry -> entry.getKey() + "=" + String.valueOf(entry.getValue()))
                 .collect(Collectors.joining("&"));
+    }
+
+    public String alipayCanonicalPayload(Map<String, Object> payload) {
+        if (payload == null || payload.isEmpty()) {
+            return "";
+        }
+        return payload.entrySet().stream()
+                .filter(entry -> entry.getValue() != null)
+                .filter(entry -> !"sign".equals(entry.getKey()) && !"sign_type".equals(entry.getKey()))
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> entry.getKey() + "=" + String.valueOf(entry.getValue()))
+                .collect(Collectors.joining("&"));
+    }
+
+    private Verification verifyAlipay(Map<String, Object> payload,
+                                      Map<String, String> headers,
+                                      PayCallbackProperties properties,
+                                      PayRuntimeConfigService runtimeConfigService) {
+        Map<String, Object> safePayload = payload == null ? new LinkedHashMap<>() : payload;
+        Map<String, String> safeHeaders = headers == null ? new LinkedHashMap<>() : headers;
+        PayCallbackProperties safeProperties = properties == null ? new PayCallbackProperties() : properties;
+        String signature = firstSignature(safePayload, safeHeaders);
+        if ((signature == null || signature.trim().isEmpty()) && !safeProperties.isRequireSignature()) {
+            return new Verification(0, "未提供签名，开发环境已跳过验签");
+        }
+        if (signature == null || signature.trim().isEmpty()) {
+            return new Verification(2, "缺少支付宝回调签名");
+        }
+        String publicKeyText = runtimeConfigService == null ? null : runtimeConfigService.alipayPublicKey();
+        if (publicKeyText == null || publicKeyText.trim().isEmpty()) {
+            return new Verification(2, "缺少支付宝公钥，无法验签");
+        }
+        String signType = firstText(safePayload, "sign_type");
+        if (signType != null && !"RSA2".equalsIgnoreCase(signType.trim())) {
+            return new Verification(2, "支付宝签名类型仅支持 RSA2");
+        }
+        try {
+            Signature verifier = Signature.getInstance("SHA256withRSA");
+            verifier.initVerify(parsePublicKey(publicKeyText));
+            verifier.update(alipayCanonicalPayload(safePayload).getBytes(StandardCharsets.UTF_8));
+            boolean matched = verifier.verify(Base64.getDecoder().decode(signature.trim()));
+            return matched
+                    ? new Verification(1, "支付宝 RSA2 签名校验通过")
+                    : new Verification(2, "支付宝 RSA2 签名不匹配");
+        } catch (Exception ex) {
+            return new Verification(2, "支付宝 RSA2 签名校验失败");
+        }
+    }
+
+    private PublicKey parsePublicKey(String publicKeyText) throws Exception {
+        String normalized = publicKeyText
+                .replace("-----BEGIN PUBLIC KEY-----", "")
+                .replace("-----END PUBLIC KEY-----", "")
+                .replaceAll("\\s", "");
+        byte[] encoded = Base64.getDecoder().decode(normalized);
+        return KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(encoded));
     }
 
     private String firstSignature(Map<String, Object> payload, Map<String, String> headers) {

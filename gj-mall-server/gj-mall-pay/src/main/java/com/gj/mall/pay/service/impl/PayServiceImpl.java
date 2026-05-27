@@ -186,7 +186,7 @@ public class PayServiceImpl implements PayService {
         callbackRecord.setRequestHeaders(toJson(safeHeaders));
 
         int signatureStatus = replaySource == null
-                ? signatureSupport.verify(safePayload, safeHeaders, runtimeCallbackProperties()).status()
+                ? signatureSupport.verify(payChannel, safePayload, safeHeaders, runtimeCallbackProperties(), runtimeConfigService).status()
                 : replaySource.getSignatureStatus();
         callbackRecord.setSignatureStatus(signatureStatus);
         if (signatureStatus == 2) {

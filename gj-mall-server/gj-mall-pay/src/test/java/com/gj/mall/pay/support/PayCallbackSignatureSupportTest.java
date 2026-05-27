@@ -1,13 +1,22 @@
 package com.gj.mall.pay.support;
 
 import com.gj.mall.pay.config.PayCallbackProperties;
+import com.gj.mall.pay.config.PayRuntimeConfigService;
+import com.gj.mall.order.enums.PayChannel;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.Signature;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class PayCallbackSignatureSupportTest {
 
@@ -60,6 +69,52 @@ class PayCallbackSignatureSupportTest {
         assertEquals("签名校验通过", verification.message());
     }
 
+    @Test
+    void verifiesAlipayRsa2CallbackSignatureWithRuntimePublicKey() throws Exception {
+        PayCallbackSignatureSupport support = new PayCallbackSignatureSupport();
+        PayCallbackProperties properties = new PayCallbackProperties();
+        properties.setRequireSignature(true);
+        PayRuntimeConfigService runtimeConfigService = mock(PayRuntimeConfigService.class);
+        KeyPair keyPair = rsaKeyPair();
+        when(runtimeConfigService.alipayPublicKey()).thenReturn(publicKeyPem(keyPair));
+
+        Map<String, Object> payload = alipayPayload();
+        payload.put("sign", rsaSign(support.alipayCanonicalPayload(payload), keyPair));
+
+        PayCallbackSignatureSupport.Verification verification = support.verify(
+                PayChannel.ALIPAY,
+                payload,
+                Collections.emptyMap(),
+                properties,
+                runtimeConfigService);
+
+        assertEquals(1, verification.status());
+        assertEquals("支付宝 RSA2 签名校验通过", verification.message());
+    }
+
+    @Test
+    void rejectsInvalidAlipayRsa2CallbackSignature() throws Exception {
+        PayCallbackSignatureSupport support = new PayCallbackSignatureSupport();
+        PayCallbackProperties properties = new PayCallbackProperties();
+        properties.setRequireSignature(true);
+        PayRuntimeConfigService runtimeConfigService = mock(PayRuntimeConfigService.class);
+        KeyPair keyPair = rsaKeyPair();
+        when(runtimeConfigService.alipayPublicKey()).thenReturn(publicKeyPem(keyPair));
+
+        Map<String, Object> payload = alipayPayload();
+        payload.put("sign", rsaSign("amount=0.01", keyPair));
+
+        PayCallbackSignatureSupport.Verification verification = support.verify(
+                PayChannel.ALIPAY,
+                payload,
+                Collections.emptyMap(),
+                properties,
+                runtimeConfigService);
+
+        assertEquals(2, verification.status());
+        assertEquals("支付宝 RSA2 签名不匹配", verification.message());
+    }
+
     private Map<String, Object> payload(String key, Object value) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put(key, value);
@@ -77,5 +132,36 @@ class PayCallbackSignatureSupportTest {
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put(key, value);
         return headers;
+    }
+
+    private Map<String, Object> alipayPayload() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("app_id", "2021000123456789");
+        payload.put("out_trade_no", "P202605220001");
+        payload.put("trade_no", "2026052222001400000001");
+        payload.put("notify_id", "2026052200222000000001");
+        payload.put("trade_status", "TRADE_SUCCESS");
+        payload.put("total_amount", "99.00");
+        payload.put("sign_type", "RSA2");
+        return payload;
+    }
+
+    private KeyPair rsaKeyPair() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        return generator.generateKeyPair();
+    }
+
+    private String publicKeyPem(KeyPair keyPair) {
+        return "-----BEGIN PUBLIC KEY-----\n"
+                + Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded())
+                + "\n-----END PUBLIC KEY-----";
+    }
+
+    private String rsaSign(String content, KeyPair keyPair) throws Exception {
+        Signature signature = Signature.getInstance("SHA256withRSA");
+        signature.initSign(keyPair.getPrivate());
+        signature.update(content.getBytes(StandardCharsets.UTF_8));
+        return Base64.getEncoder().encodeToString(signature.sign());
     }
 }
