@@ -10,7 +10,7 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.mapper.PayRefundRecordMapper;
 import com.gj.mall.order.service.OrderService;
-import com.gj.mall.pay.config.PayCallbackProperties;
+import com.gj.mall.pay.config.PayRuntimeConfigService;
 import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.admin.vo.AdminPaymentAccessVO;
@@ -18,10 +18,11 @@ import com.gj.mall.admin.vo.AdminPaymentVO;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import com.gj.mall.user.service.UserMessageService;
 import org.junit.jupiter.api.Test;
-
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,7 +57,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 messageService);
 
         PayPaymentRecord payment = paidPayment();
@@ -95,7 +96,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayRefundRecord refund = failedRefund();
@@ -138,7 +139,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayRefundRecord refund = failedRefund();
@@ -171,7 +172,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayRefundRecord refund = failedRefund();
@@ -208,7 +209,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         service.replayCallback(88L);
@@ -234,7 +235,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         AdminPaymentAccessVO access = service.access();
@@ -243,6 +244,248 @@ class AdminPaymentServiceImplTest {
         assertTrue(access.getDevSignatureHeader().contains("x-gj-pay-signature"));
         assertTrue(access.getDevSignature().length() >= 32);
         assertTrue(access.getDevCallbackExample().contains("P202605220001"));
+    }
+
+    @Test
+    void accessExplainsMissingProductionPaymentConfiguration() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                missingRealRuntimeConfig(),
+                mock(UserMessageService.class));
+        AdminPaymentAccessVO access = service.access();
+
+        assertFalse(access.getReady());
+        assertEquals("真实支付配置未就绪", access.getReadinessText());
+        assertTrue(access.getReadinessTips().contains("真实支付模式建议开启 mall.pay.callback.require-signature"));
+        assertTrue(access.getReadinessTips().contains("请配置 mall.pay.callback.secret"));
+        assertTrue(access.getReadinessTips().contains("请配置 mall.pay.wechat.app-id"));
+        assertTrue(access.getReadinessTips().contains("请配置 mall.pay.alipay.app-id"));
+        assertEquals("缺少 app-id、mch-id、api-v3-key、merchant-serial-no、private-key-path、notify-url", access.getChannels().get(1).getStatus());
+        assertEquals("缺少 app-id、private-key、alipay-public-key、notify-url", access.getChannels().get(2).getStatus());
+    }
+
+    @Test
+    void accessWarnsWhenRealModeUsesDefaultDevelopmentCallbackSecret() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        PayRuntimeConfigService runtimeConfig = completeRealRuntimeConfig("gj-mall-dev-pay-callback-secret");
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                runtimeConfig,
+                mock(UserMessageService.class));
+
+        AdminPaymentAccessVO access = service.access();
+
+        assertFalse(access.getReady());
+        assertTrue(access.getReadinessTips().contains("请替换默认开发回调密钥 mall.pay.callback.secret"));
+        assertEquals("商户配置已填写，私钥文件可读取，等待 SDK 接入", access.getChannels().get(1).getStatus());
+        assertEquals("应用配置已填写，等待 SDK 接入", access.getChannels().get(2).getStatus());
+    }
+
+    @Test
+    void accessWarnsWhenWechatPrivateKeyPathIsUnreadable() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        PayRuntimeConfigService runtimeConfig = completeRealRuntimeConfig("prod-callback-secret");
+        when(runtimeConfig.wechatPrivateKeyFileReadable()).thenReturn(false);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                runtimeConfig,
+                mock(UserMessageService.class));
+
+        AdminPaymentAccessVO access = service.access();
+
+        assertFalse(access.getReady());
+        assertTrue(access.getReadinessTips().contains("请确认 mall.pay.wechat.private-key-path 文件存在且服务进程可读取"));
+        assertEquals("私钥文件不可读", access.getChannels().get(1).getStatus());
+    }
+
+    @Test
+    void accessWarnsWhenWechatNotifyUrlIsNotHttps() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        PayRuntimeConfigService runtimeConfig = completeRealRuntimeConfig("prod-callback-secret");
+        when(runtimeConfig.wechatNotifyUrl()).thenReturn("http://shop.guanjing.cloud/api/pay/callback/wechat");
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                runtimeConfig,
+                mock(UserMessageService.class));
+
+        AdminPaymentAccessVO access = service.access();
+
+        assertFalse(access.getReady());
+        assertTrue(access.getReadinessTips().contains("请将 mall.pay.wechat.notify-url 配置为 https:// 开头的有效地址"));
+        assertEquals("回调地址需使用 HTTPS", access.getChannels().get(1).getStatus());
+    }
+
+    @Test
+    void accessWarnsWhenWechatNotifyUrlPathDoesNotMatchCallbackEndpoint() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        PayRuntimeConfigService runtimeConfig = completeRealRuntimeConfig("prod-callback-secret");
+        when(runtimeConfig.wechatNotifyUrl()).thenReturn("https://shop.guanjing.cloud/pay/wx-notify");
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                runtimeConfig,
+                mock(UserMessageService.class));
+
+        AdminPaymentAccessVO access = service.access();
+
+        assertFalse(access.getReady());
+        assertTrue(access.getReadinessTips().contains("请将 mall.pay.wechat.notify-url 指向 /api/pay/callback/wechat"));
+        assertEquals("回调地址路径需为 /api/pay/callback/wechat", access.getChannels().get(1).getStatus());
+    }
+
+    @Test
+    void accessWarnsWhenAlipayNotifyUrlIsNotHttps() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        PayRuntimeConfigService runtimeConfig = completeRealRuntimeConfig("prod-callback-secret");
+        when(runtimeConfig.alipayNotifyUrl()).thenReturn("http://shop.guanjing.cloud/api/pay/callback/alipay");
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                runtimeConfig,
+                mock(UserMessageService.class));
+
+        AdminPaymentAccessVO access = service.access();
+
+        assertFalse(access.getReady());
+        assertTrue(access.getReadinessTips().contains("请将 mall.pay.alipay.notify-url 配置为 https:// 开头的有效地址"));
+        assertEquals("回调地址需使用 HTTPS", access.getChannels().get(2).getStatus());
+    }
+
+    @Test
+    void accessWarnsWhenAlipayNotifyUrlPathDoesNotMatchCallbackEndpoint() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        PayRuntimeConfigService runtimeConfig = completeRealRuntimeConfig("prod-callback-secret");
+        when(runtimeConfig.alipayNotifyUrl()).thenReturn("https://shop.guanjing.cloud/pay/notify");
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                runtimeConfig,
+                mock(UserMessageService.class));
+
+        AdminPaymentAccessVO access = service.access();
+
+        assertFalse(access.getReady());
+        assertTrue(access.getReadinessTips().contains("请将 mall.pay.alipay.notify-url 指向 /api/pay/callback/alipay"));
+        assertEquals("回调地址路径需为 /api/pay/callback/alipay", access.getChannels().get(2).getStatus());
+    }
+
+    @Test
+    void accessReadyWhenRealRuntimeConfigIsCompleteAndPrivateKeyReadable() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        PayRuntimeConfigService runtimeConfig = completeRealRuntimeConfig("prod-callback-secret");
+        when(runtimeConfig.wechatPrivateKeyFileReadable()).thenReturn(true);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                runtimeConfig,
+                mock(UserMessageService.class));
+
+        AdminPaymentAccessVO access = service.access();
+
+        assertTrue(access.getReady());
+        assertEquals("真实支付配置已就绪", access.getReadinessText());
+        assertEquals("商户配置已填写，私钥文件可读取，等待 SDK 接入", access.getChannels().get(1).getStatus());
     }
 
     @Test
@@ -263,7 +506,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayPaymentRecord payment = pendingWechatPayment();
@@ -301,7 +544,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayPaymentRecord payment = pendingWechatPayment();
@@ -333,7 +576,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayPaymentRecord payment = pendingWechatPayment();
@@ -372,7 +615,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayPaymentRecord payment = pendingWechatPayment();
@@ -406,7 +649,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayPaymentRecord payment = paidPayment();
@@ -442,7 +685,7 @@ class AdminPaymentServiceImplTest {
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
-                new PayCallbackProperties(),
+                defaultRuntimeConfig(),
                 mock(UserMessageService.class));
 
         PayPaymentRecord payment = paidPayment();
@@ -461,6 +704,47 @@ class AdminPaymentServiceImplTest {
         assertEquals("退款记录已存在，请在退款记录中处理", detail.getRefundReason());
     }
 
+    private PayRuntimeConfigService defaultRuntimeConfig() {
+        return runtimeConfig("mock", false, "gj-mall-dev-pay-callback-secret");
+    }
+
+    private PayRuntimeConfigService missingRealRuntimeConfig() {
+        return runtimeConfig("real", false, "");
+    }
+
+    private PayRuntimeConfigService completeRealRuntimeConfig(String callbackSecret) {
+        PayRuntimeConfigService service = runtimeConfig("real", true, callbackSecret);
+        when(service.wechatAppId()).thenReturn("wx-app");
+        when(service.wechatMchId()).thenReturn("wx-mch");
+        when(service.wechatApiV3Key()).thenReturn("wx-api-v3-key");
+        when(service.wechatMerchantSerialNo()).thenReturn("wx-serial");
+        when(service.wechatPrivateKeyPath()).thenReturn("/secure/wx-private.pem");
+        when(service.wechatNotifyUrl()).thenReturn("https://shop.guanjing.cloud/api/pay/callback/wechat");
+        when(service.wechatPrivateKeyFileReadable()).thenReturn(true);
+        when(service.alipayAppId()).thenReturn("ali-app");
+        when(service.alipayPrivateKey()).thenReturn("ali-private");
+        when(service.alipayPublicKey()).thenReturn("ali-public");
+        when(service.alipayNotifyUrl()).thenReturn("https://shop.guanjing.cloud/api/pay/callback/alipay");
+        return service;
+    }
+
+    private PayRuntimeConfigService runtimeConfig(String mode, boolean requireSignature, String callbackSecret) {
+        PayRuntimeConfigService service = mock(PayRuntimeConfigService.class);
+        Map<String, String> values = new HashMap<>();
+        values.put("mall.pay.mode", mode);
+        values.put("mall.pay.callback.secret", callbackSecret);
+        when(service.mode()).thenReturn(mode);
+        when(service.callbackRequireSignature()).thenReturn(requireSignature);
+        when(service.callbackSecret()).thenReturn(callbackSecret);
+        when(service.usingDefaultCallbackSecret()).thenReturn("gj-mall-dev-pay-callback-secret".equals(callbackSecret));
+        when(service.text(any(String.class), any(String.class))).thenAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            String defaultValue = invocation.getArgument(1);
+            String value = values.get(key);
+            return value == null ? defaultValue : value;
+        });
+        return service;
+    }
     private PayRefundRecord failedRefund() {
         PayRefundRecord refund = new PayRefundRecord();
         refund.setId(900L);

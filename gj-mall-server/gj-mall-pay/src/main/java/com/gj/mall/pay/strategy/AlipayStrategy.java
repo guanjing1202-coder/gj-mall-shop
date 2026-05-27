@@ -4,18 +4,21 @@ import com.gj.mall.common.enums.ResultCode;
 import com.gj.mall.common.exception.BizException;
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.enums.PayChannel;
+import com.gj.mall.pay.config.PayRuntimeConfigService;
+import com.gj.mall.pay.gateway.AlipayAdapter;
 import com.gj.mall.pay.vo.PayResultVO;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
  * 支付宝占位：等用户提供 AppID/私钥/支付宝公钥后接 alipay-sdk-java
  */
 @Component
+@RequiredArgsConstructor
 public class AlipayStrategy implements PayStrategy {
 
-    @Value("${mall.pay.mode:mock}")
-    private String mode;
+    private final PayRuntimeConfigService runtimeConfigService;
+    private final AlipayAdapter adapter;
 
     @Override
     public String channelName() {
@@ -29,10 +32,10 @@ public class AlipayStrategy implements PayStrategy {
 
     @Override
     public PayResultVO pay(OmsOrder order, String payNo) {
+        String mode = runtimeConfigService.mode();
         if (!"real".equalsIgnoreCase(mode)) {
             throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT, "支付宝未启用，当前 mall.pay.mode=" + mode);
         }
-        // TODO: 接入 alipay-sdk-java，调用 alipay.trade.app.pay / page.pay
-        throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT, "支付宝尚未对接");
+        return adapter.createPayment(order, payNo);
     }
 }

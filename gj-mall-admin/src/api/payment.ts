@@ -118,6 +118,9 @@ export interface PaymentAccessChannel {
 
 export interface PaymentAccess {
   mode: string
+  ready?: boolean
+  readinessText?: string
+  readinessTips?: string[]
   callbackRequireSignature: boolean
   callbackPath: string
   devSignatureAlgorithm: string

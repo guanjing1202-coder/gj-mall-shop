@@ -28,6 +28,7 @@ const filters = reactive({
 const columns: TableColumnsType<OperationLogRecord> = [
   { title: '操作', dataIndex: 'operation', key: 'operation', width: 260 },
   { title: '管理员', dataIndex: 'username', key: 'admin', width: 170 },
+  { title: '变更摘要', dataIndex: 'requestSummary', key: 'summary', width: 300 },
   { title: '请求', dataIndex: 'requestUri', key: 'request', width: 320 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 110 },
   { title: '耗时', dataIndex: 'costTime', key: 'costTime', width: 110 },
@@ -162,6 +163,9 @@ function toLog(record: Record<string, any>) {
           <div>{{ record.username || '--' }}</div>
           <div class="log-muted">ID {{ record.adminId || '--' }}</div>
         </template>
+        <template v-else-if="column.key === 'summary'">
+          <div class="log-summary">{{ record.requestSummary || '--' }}</div>
+        </template>
         <template v-else-if="column.key === 'request'">
           <a-tag :color="methodColor(record.requestMethod)">
             {{ record.requestMethod }}
@@ -227,6 +231,12 @@ function toLog(record: Record<string, any>) {
 
 .log-uri {
   word-break: break-all;
+}
+
+.log-summary {
+  color: #434f5a;
+  line-height: 1.6;
+  word-break: break-word;
 }
 
 .log-pre {

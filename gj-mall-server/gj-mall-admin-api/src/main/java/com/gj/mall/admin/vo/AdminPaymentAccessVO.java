@@ -8,6 +8,9 @@ import java.util.List;
 @Data
 public class AdminPaymentAccessVO {
     private String mode;
+    private Boolean ready;
+    private String readinessText;
+    private List<String> readinessTips = new ArrayList<>();
     private Boolean callbackRequireSignature;
     private String callbackPath;
     private String devSignatureAlgorithm;

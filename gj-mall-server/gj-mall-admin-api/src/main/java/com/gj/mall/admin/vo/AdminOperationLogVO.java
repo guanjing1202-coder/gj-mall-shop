@@ -17,6 +17,7 @@ public class AdminOperationLogVO {
     private String requestMethod;
     private String requestUri;
     private String requestParams;
+    private String requestSummary;
     private String ip;
     private Integer status;
     private String statusDesc;
@@ -34,6 +35,7 @@ public class AdminOperationLogVO {
         vo.setRequestMethod(log.getRequestMethod());
         vo.setRequestUri(log.getRequestUri());
         vo.setRequestParams(log.getRequestParams());
+        vo.setRequestSummary(log.getRequestSummary());
         vo.setIp(log.getIp());
         vo.setStatus(log.getStatus());
         vo.setStatusDesc(log.getStatus() != null && log.getStatus() == 1 ? "成功" : "失败");

@@ -34,6 +34,7 @@ export interface OperationLogRecord {
   requestMethod: string
   requestUri: string
   requestParams?: string
+  requestSummary?: string
   ip?: string
   status: number
   statusDesc?: string

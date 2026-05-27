@@ -1,6 +1,7 @@
 package com.gj.mall.admin.vo;
 
 import com.gj.mall.admin.entity.SysConfig;
+import com.gj.mall.admin.support.AdminConfigSecurity;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -23,6 +24,8 @@ public class AdminConfigVO {
     private Integer editable;
     private Integer status;
     private String statusDesc;
+    private Boolean sensitive;
+    private Boolean masked;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 
@@ -31,7 +34,8 @@ public class AdminConfigVO {
         vo.setId(config.getId());
         vo.setConfigKey(config.getConfigKey());
         vo.setConfigName(config.getConfigName());
-        vo.setConfigValue(config.getConfigValue());
+        boolean sensitive = AdminConfigSecurity.isSensitive(config.getConfigKey());
+        vo.setConfigValue(sensitive ? AdminConfigSecurity.maskValue(config.getConfigValue()) : config.getConfigValue());
         vo.setValueType(config.getValueType());
         vo.setValueTypeDesc(valueTypeName(config.getValueType()));
         vo.setGroupCode(config.getGroupCode());
@@ -40,6 +44,8 @@ public class AdminConfigVO {
         vo.setEditable(config.getEditable());
         vo.setStatus(config.getStatus());
         vo.setStatusDesc(config.getStatus() != null && config.getStatus() == 1 ? "启用" : "停用");
+        vo.setSensitive(sensitive);
+        vo.setMasked(sensitive);
         vo.setCreateTime(config.getCreateTime());
         vo.setUpdateTime(config.getUpdateTime());
         return vo;
@@ -59,6 +65,7 @@ public class AdminConfigVO {
         names.put("basic", "基础");
         names.put("product", "商品");
         names.put("order", "订单");
+        names.put("payment", "支付");
         names.put("marketing", "营销");
         names.put("after_sale", "售后");
         return names.getOrDefault(groupCode, groupCode);

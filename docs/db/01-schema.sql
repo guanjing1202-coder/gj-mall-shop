@@ -560,6 +560,7 @@ CREATE TABLE sys_operation_log (
     request_method  VARCHAR(10)     NOT NULL                COMMENT '请求方法',
     request_uri     VARCHAR(255)    NOT NULL                COMMENT '请求地址',
     request_params  TEXT            DEFAULT NULL            COMMENT '请求参数',
+    request_summary VARCHAR(500)    DEFAULT NULL            COMMENT '变更摘要',
     ip              VARCHAR(64)     DEFAULT NULL            COMMENT '客户端IP',
     status          TINYINT         NOT NULL DEFAULT 1      COMMENT '状态 0失败 1成功',
     error_message   VARCHAR(500)    DEFAULT NULL            COMMENT '失败原因',

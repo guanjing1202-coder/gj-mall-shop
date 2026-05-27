@@ -8,6 +8,7 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.pay.config.PayCallbackProperties;
+import com.gj.mall.pay.config.PayRuntimeConfigService;
 import com.gj.mall.pay.support.PayCallbackEventSupport;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.pay.strategy.PayStrategy;
@@ -65,6 +66,7 @@ class PayServiceImplTest {
                 recordMapper,
                 callbackRecordMapper,
                 new PayCallbackProperties(),
+                null,
                 new PayCallbackSignatureSupport(),
                 new PayCallbackEventSupport(),
                 new ObjectMapper(),
@@ -105,6 +107,7 @@ class PayServiceImplTest {
                 recordMapper,
                 callbackRecordMapper,
                 new PayCallbackProperties(),
+                null,
                 new PayCallbackSignatureSupport(),
                 new PayCallbackEventSupport(),
                 new ObjectMapper(),
@@ -133,6 +136,7 @@ class PayServiceImplTest {
                 recordMapper,
                 callbackRecordMapper,
                 new PayCallbackProperties(),
+                null,
                 new PayCallbackSignatureSupport(),
                 new PayCallbackEventSupport(),
                 new ObjectMapper(),
@@ -149,6 +153,40 @@ class PayServiceImplTest {
         verify(callbackRecordMapper).insert(argThat(callback ->
                 Integer.valueOf(2).equals(callback.getProcessStatus())
                         && "NOTPAY".equals(callback.getEventType())));
+    }
+
+    @Test
+    void handleCallbackUsesRuntimeCallbackSecretForSignatureVerification() {
+        OrderService orderService = mock(OrderService.class);
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRuntimeConfigService runtimeConfigService = mock(PayRuntimeConfigService.class);
+        PayCallbackSignatureSupport signatureSupport = new PayCallbackSignatureSupport();
+        PayServiceImpl service = new PayServiceImpl(
+                Collections.<PayStrategy>emptyList(),
+                orderService,
+                recordMapper,
+                callbackRecordMapper,
+                new PayCallbackProperties(),
+                runtimeConfigService,
+                signatureSupport,
+                new PayCallbackEventSupport(),
+                new ObjectMapper(),
+                transactionManager);
+
+        Map<String, Object> payload = callbackPayload("SUCCESS");
+        payload.put("signature", signatureSupport.sign(payload, "runtime-secret"));
+        PayPaymentRecord payment = pendingPayment();
+        when(runtimeConfigService.callbackRequireSignature()).thenReturn(true);
+        when(runtimeConfigService.callbackSecret()).thenReturn("runtime-secret");
+        when(recordMapper.selectOne(any())).thenReturn(payment);
+
+        service.handleCallback("mock", payload, Collections.emptyMap());
+
+        verify(callbackRecordMapper).insert(argThat(callback ->
+                Integer.valueOf(1).equals(callback.getSignatureStatus())
+                        && Integer.valueOf(1).equals(callback.getProcessStatus())));
+        verify(orderService).markPaid(payment.getOrderId(), payment.getChannel());
     }
 
     private PayCallbackRecord failedCallback() {

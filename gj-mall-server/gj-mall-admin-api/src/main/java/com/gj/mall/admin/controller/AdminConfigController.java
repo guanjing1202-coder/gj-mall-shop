@@ -3,6 +3,8 @@ package com.gj.mall.admin.controller;
 import com.gj.mall.admin.dto.AdminConfigQueryDTO;
 import com.gj.mall.admin.dto.AdminConfigSaveDTO;
 import com.gj.mall.admin.service.AdminConfigService;
+import com.gj.mall.admin.vo.AdminConfigGroupSummaryVO;
+import com.gj.mall.admin.vo.AdminConfigInitResultVO;
 import com.gj.mall.admin.vo.AdminConfigVO;
 import com.gj.mall.common.result.PageResult;
 import com.gj.mall.common.result.Result;
@@ -33,6 +35,18 @@ public class AdminConfigController {
     @GetMapping("/page")
     public Result<PageResult<AdminConfigVO>> page(AdminConfigQueryDTO query) {
         return Result.success(configService.page(query));
+    }
+
+    @Operation(summary = "系统配置分组摘要")
+    @GetMapping("/summary")
+    public Result<AdminConfigGroupSummaryVO> summary(@RequestParam String groupCode) {
+        return Result.success(configService.summary(groupCode));
+    }
+
+    @Operation(summary = "初始化支付配置")
+    @PostMapping("/payment/initialize")
+    public Result<AdminConfigInitResultVO> initializePaymentConfigs() {
+        return Result.success(configService.initializePaymentConfigs());
     }
 
     @Operation(summary = "系统配置详情")

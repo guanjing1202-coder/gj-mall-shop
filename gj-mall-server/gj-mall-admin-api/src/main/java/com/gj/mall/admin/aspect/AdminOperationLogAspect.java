@@ -3,10 +3,14 @@ package com.gj.mall.admin.aspect;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.extra.servlet.ServletUtil;
 import com.alibaba.fastjson2.JSON;
+import com.gj.mall.admin.dto.AdminConfigSaveDTO;
+import com.gj.mall.admin.entity.SysConfig;
 import com.gj.mall.admin.entity.SysOperationLog;
 import com.gj.mall.admin.entity.SysUser;
 import com.gj.mall.admin.mapper.SysUserMapper;
 import com.gj.mall.admin.service.AdminOperationLogService;
+import com.gj.mall.admin.support.AdminConfigSecurity;
+import com.gj.mall.admin.support.AdminConfigSummarySupport;
 import com.gj.mall.common.result.Result;
 import com.gj.mall.framework.context.UserContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -79,6 +83,7 @@ public class AdminOperationLogAspect {
             log.setRequestMethod(request.getMethod());
             log.setRequestUri(request.getRequestURI());
             log.setRequestParams(serializeArgs(joinPoint.getArgs()));
+            log.setRequestSummary(summarizeRequest(request, joinPoint.getArgs()));
             log.setIp(ServletUtil.getClientIP(request));
             log.setCostTime(costTime);
             log.setStatus(resolveStatus(result, error));
@@ -157,7 +162,7 @@ public class AdminOperationLogAspect {
             List<Object> values = new ArrayList<>();
             for (Object arg : args) {
                 if (isLoggableArg(arg)) {
-                    values.add(arg);
+                    values.add(maskLogArg(arg));
                 }
             }
             if (values.isEmpty()) {
@@ -169,6 +174,56 @@ public class AdminOperationLogAspect {
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    private Object maskLogArg(Object arg) {
+        if (arg instanceof AdminConfigSaveDTO) {
+            AdminConfigSaveDTO dto = (AdminConfigSaveDTO) arg;
+            if (AdminConfigSecurity.isSensitive(dto.getConfigKey())) {
+                AdminConfigSaveDTO copy = new AdminConfigSaveDTO();
+                copy.setId(dto.getId());
+                copy.setConfigKey(dto.getConfigKey());
+                copy.setConfigName(dto.getConfigName());
+                copy.setConfigValue(StrUtil.isBlank(dto.getConfigValue()) ? dto.getConfigValue() : "******");
+                copy.setValueType(dto.getValueType());
+                copy.setGroupCode(dto.getGroupCode());
+                copy.setDescription(dto.getDescription());
+                copy.setEditable(dto.getEditable());
+                copy.setStatus(dto.getStatus());
+                return copy;
+            }
+        }
+        return arg;
+    }
+
+    private String summarizeArgs(Object[] args) {
+        for (Object arg : args) {
+            if (arg instanceof AdminConfigSaveDTO) {
+                AdminConfigSaveDTO dto = (AdminConfigSaveDTO) arg;
+                SysConfig config = new SysConfig();
+                config.setConfigKey(StrUtil.trim(dto.getConfigKey()));
+                config.setConfigName(StrUtil.trim(dto.getConfigName()));
+                config.setGroupCode(StrUtil.blankToDefault(StrUtil.trim(dto.getGroupCode()), "basic"));
+                config.setConfigValue(StrUtil.trim(dto.getConfigValue()));
+                config.setValueType(StrUtil.blankToDefault(StrUtil.trim(dto.getValueType()), "text"));
+                config.setStatus(dto.getStatus() == null ? 1 : dto.getStatus());
+                return AdminConfigSummarySupport.buildChangeSummary(null, config, resolveConfigAction(dto));
+            }
+        }
+        return null;
+    }
+
+    private String summarizeRequest(HttpServletRequest request, Object[] args) {
+        if (request != null
+                && "POST".equalsIgnoreCase(request.getMethod())
+                && "/api/admin/sys/config/payment/initialize".equals(request.getRequestURI())) {
+            return "初始化支付配置缺失项";
+        }
+        return summarizeArgs(args);
+    }
+
+    private String resolveConfigAction(AdminConfigSaveDTO dto) {
+        return dto.getId() == null ? "create" : "update";
     }
 
     private boolean isLoggableArg(Object arg) {

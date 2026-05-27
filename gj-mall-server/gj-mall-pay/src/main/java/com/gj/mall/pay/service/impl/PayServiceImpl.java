@@ -14,6 +14,7 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.pay.config.PayCallbackProperties;
+import com.gj.mall.pay.config.PayRuntimeConfigService;
 import com.gj.mall.pay.dto.PayDTO;
 import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.strategy.PayStrategy;
@@ -45,6 +46,7 @@ public class PayServiceImpl implements PayService {
     private final PayPaymentRecordMapper recordMapper;
     private final PayCallbackRecordMapper callbackRecordMapper;
     private final PayCallbackProperties callbackProperties;
+    private final PayRuntimeConfigService runtimeConfigService;
     private final PayCallbackSignatureSupport signatureSupport;
     private final PayCallbackEventSupport eventSupport;
     private final ObjectMapper objectMapper;
@@ -183,7 +185,9 @@ public class PayServiceImpl implements PayService {
         callbackRecord.setRawData(rawData);
         callbackRecord.setRequestHeaders(toJson(safeHeaders));
 
-        int signatureStatus = replaySource == null ? signatureSupport.verify(safePayload, safeHeaders, callbackProperties).status() : replaySource.getSignatureStatus();
+        int signatureStatus = replaySource == null
+                ? signatureSupport.verify(safePayload, safeHeaders, runtimeCallbackProperties()).status()
+                : replaySource.getSignatureStatus();
         callbackRecord.setSignatureStatus(signatureStatus);
         if (signatureStatus == 2) {
             callbackRecord.setProcessStatus(3);
@@ -332,6 +336,16 @@ public class PayServiceImpl implements PayService {
 
     private TransactionTemplate callbackTransactionTemplate() {
         return new TransactionTemplate(transactionManager);
+    }
+
+    private PayCallbackProperties runtimeCallbackProperties() {
+        if (runtimeConfigService == null) {
+            return callbackProperties;
+        }
+        PayCallbackProperties properties = new PayCallbackProperties();
+        properties.setRequireSignature(runtimeConfigService.callbackRequireSignature());
+        properties.setSecret(runtimeConfigService.callbackSecret());
+        return properties;
     }
 
     private void saveCallbackRecord(PayCallbackRecord callbackRecord) {

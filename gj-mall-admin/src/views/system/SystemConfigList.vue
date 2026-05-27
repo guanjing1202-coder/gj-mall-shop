@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
 import { message, Modal } from 'ant-design-vue'
 import {
   DeleteOutlined,
   EditOutlined,
   FolderOpenOutlined,
+  LockOutlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -17,16 +19,28 @@ import {
   createSystemConfig,
   deleteSystemConfig,
   getSystemConfigPage,
+  getSystemConfigSummary,
   getUploadStorageSummary,
+  initializePaymentConfigs,
   updateSystemConfig,
   updateSystemConfigStatus,
   type ApiId,
+  type ConfigGroupSummary,
   type SystemConfigPayload,
   type SystemConfigRecord,
   type UploadCleanupResult,
   type UploadStorageSummary,
 } from '@/api/systemConfig'
+import {
+  canInitializePaymentConfig,
+  formatConfigInitResult,
+  isSensitiveConfig,
+  normalizeConfigSummaryMetrics,
+  sensitiveConfigHint,
+  shouldConfirmSensitiveConfigSave,
+} from '@/utils/system-config-ui'
 
+const route = useRoute()
 const loading = ref(false)
 const modalOpen = ref(false)
 const modalLoading = ref(false)
@@ -39,6 +53,8 @@ const storageSummary = ref<UploadStorageSummary>()
 const cleanupPreview = ref<UploadCleanupResult>()
 const cleanupPreviewOpen = ref(false)
 const retainDays = ref(7)
+const configSummary = ref<ConfigGroupSummary>()
+const initPaymentLoading = ref(false)
 
 const pagination = reactive({
   current: 1,
@@ -64,12 +80,14 @@ const formState = reactive<SystemConfigPayload>({
   editable: 1,
   status: 1,
 })
+const currentConfig = ref<SystemConfigRecord>()
 
 const groupOptions = [
   { label: '全部', value: '' },
   { label: '基础', value: 'basic' },
   { label: '商品', value: 'product' },
   { label: '订单', value: 'order' },
+  { label: '支付', value: 'payment' },
   { label: '营销', value: 'marketing' },
   { label: '售后', value: 'after_sale' },
 ]
@@ -100,11 +118,26 @@ const cleanupCandidateCount = computed(() => Number(storageSummary.value?.cleanu
 const totalUploadFiles = computed(() => Number(storageSummary.value?.totalFiles || 0))
 const referencedUploadFiles = computed(() => Number(storageSummary.value?.referencedFiles || 0))
 const orphanUploadFiles = computed(() => Number(storageSummary.value?.orphanFiles || 0))
+const configSummaryMetrics = computed(() => normalizeConfigSummaryMetrics(configSummary.value))
 
 onMounted(() => {
+  applyRouteFilters()
   fetchConfigs()
+  fetchConfigSummary()
   fetchUploadStorage()
 })
+
+function routeValue(name: string) {
+  const value = route.query[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function applyRouteFilters() {
+  const groupCode = routeValue('groupCode')
+  const keyword = routeValue('keyword')
+  filters.groupCode = typeof groupCode === 'string' ? groupCode : ''
+  filters.keyword = typeof keyword === 'string' ? keyword : ''
+}
 
 async function fetchConfigs() {
   loading.value = true
@@ -127,9 +160,16 @@ async function fetchConfigs() {
   }
 }
 
+async function fetchConfigSummary() {
+  const targetGroup = filters.groupCode || 'payment'
+  const res = await getSystemConfigSummary(targetGroup)
+  configSummary.value = res.data
+}
+
 async function handleSearch() {
   pagination.current = 1
   await fetchConfigs()
+  await fetchConfigSummary()
 }
 
 async function handleReset() {
@@ -139,11 +179,39 @@ async function handleReset() {
   filters.status = undefined
   pagination.current = 1
   await fetchConfigs()
+  await fetchConfigSummary()
 }
 
 async function handleGroupChange() {
   pagination.current = 1
   await fetchConfigs()
+  await fetchConfigSummary()
+}
+
+function canInitializePaymentConfigs() {
+  return canInitializePaymentConfig(configSummary.value)
+}
+
+function handleInitializePaymentConfigs() {
+  Modal.confirm({
+    title: '初始化支付配置',
+    content: '将只创建缺失的支付配置项，不会覆盖已有配置或密钥。确认继续吗？',
+    okText: '初始化',
+    cancelText: '取消',
+    async onOk() {
+      initPaymentLoading.value = true
+      try {
+        const res = await initializePaymentConfigs()
+        message.success(formatConfigInitResult(res.data))
+        filters.groupCode = 'payment'
+        pagination.current = 1
+        await fetchConfigs()
+        await fetchConfigSummary()
+      } finally {
+        initPaymentLoading.value = false
+      }
+    },
+  })
 }
 
 async function handleTableChange(page: { current?: number; pageSize?: number }) {
@@ -154,12 +222,14 @@ async function handleTableChange(page: { current?: number; pageSize?: number }) 
 
 function openCreate() {
   editing.value = false
+  currentConfig.value = undefined
   resetForm()
   modalOpen.value = true
 }
 
 function openEdit(record: SystemConfigRecord) {
   editing.value = true
+  currentConfig.value = record
   Object.assign(formState, {
     id: record.id,
     configKey: record.configKey,
@@ -176,6 +246,22 @@ function openEdit(record: SystemConfigRecord) {
 
 async function handleSubmit() {
   await formRef.value?.validate()
+  if (shouldConfirmSensitiveConfigSave(currentConfig.value, formState)) {
+    Modal.confirm({
+      title: '替换敏感配置值',
+      content: `确认替换「${formState.configName}」的敏感值吗？保存后后台只会脱敏展示，新值请确认已妥善备份。`,
+      okText: '确认保存',
+      cancelText: '再检查一下',
+      async onOk() {
+        await submitConfig()
+      },
+    })
+    return
+  }
+  await submitConfig()
+}
+
+async function submitConfig() {
   modalLoading.value = true
   try {
     if (editing.value) {
@@ -186,7 +272,9 @@ async function handleSubmit() {
       message.success('配置已新增')
     }
     modalOpen.value = false
+    currentConfig.value = undefined
     await fetchConfigs()
+    await fetchConfigSummary()
   } finally {
     modalLoading.value = false
   }
@@ -213,6 +301,7 @@ function handleDelete(record: SystemConfigRecord) {
       await deleteSystemConfig(record.id)
       message.success('配置已删除')
       await fetchConfigs()
+      await fetchConfigSummary()
     },
   })
 }
@@ -224,11 +313,12 @@ function resetForm() {
     configName: '',
     configValue: '',
     valueType: 'text',
-    groupCode: 'basic',
+    groupCode: filters.groupCode || 'basic',
     description: '',
     editable: 1,
     status: 1,
   })
+  currentConfig.value = undefined
   formRef.value?.clearValidate()
 }
 
@@ -239,6 +329,10 @@ function valueClass(valueType?: string) {
 function displayValue(record: SystemConfigRecord) {
   const value = String(record.configValue ?? '').trim()
   return value || '--'
+}
+
+function sensitiveHint(record?: SystemConfigRecord) {
+  return sensitiveConfigHint(record || formState)
 }
 
 function handleSwitchChange(record: SystemConfigRecord, checked: unknown) {
@@ -299,6 +393,10 @@ function formatSize(value?: number) {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
+
+function configSummaryPercent() {
+  return Number(configSummary.value?.completenessPercent || 0)
+}
 </script>
 
 <template>
@@ -331,6 +429,62 @@ function formatSize(value?: number) {
         <span>可编辑项</span>
         <strong>{{ editableCount }}</strong>
       </div>
+    </section>
+
+    <section v-if="configSummary" class="payment-summary-panel">
+      <div class="payment-summary-head">
+        <div>
+          <div class="page-kicker">Payment Readiness</div>
+          <h2>{{ configSummary.groupName || configSummary.groupCode }}配置完整度</h2>
+        </div>
+        <div class="summary-actions">
+          <a-button
+            v-if="canInitializePaymentConfigs()"
+            :loading="initPaymentLoading"
+            @click="handleInitializePaymentConfigs"
+          >
+            <template #icon><PlusOutlined /></template>
+            初始化缺失配置
+          </a-button>
+          <div class="summary-percent" :class="{ warning: configSummaryPercent() < 80 }">
+            {{ configSummaryPercent() }}%
+          </div>
+        </div>
+      </div>
+      <div class="payment-summary-grid">
+        <div>
+          <span>应配置</span>
+          <strong>{{ configSummaryMetrics.requiredCount }}</strong>
+        </div>
+        <div>
+          <span>已就绪</span>
+          <strong>{{ configSummaryMetrics.readyCount }}</strong>
+        </div>
+        <div>
+          <span>已启用</span>
+          <strong>{{ configSummaryMetrics.enabledCount }}</strong>
+        </div>
+        <div class="danger">
+          <span>待补齐</span>
+          <strong>{{ configSummaryMetrics.missingCount }}</strong>
+        </div>
+      </div>
+      <a-alert
+        v-if="configSummary.missingKeys?.length"
+        class="storage-alert"
+        type="warning"
+        show-icon
+        :message="`待补齐 ${configSummary.missingKeys.length} 项${configSummary.groupName || configSummary.groupCode}配置`"
+        :description="configSummary.missingKeys.join(' / ')"
+      />
+      <a-alert
+        v-if="configSummary.uninitializedKeys?.length"
+        class="storage-alert"
+        type="info"
+        show-icon
+        :message="`其中 ${configSummary.uninitializedKeys.length} 项配置尚未初始化`"
+        :description="configSummary.uninitializedKeys.join(' / ')"
+      />
     </section>
 
     <section class="storage-panel">
@@ -440,7 +594,13 @@ function formatSize(value?: number) {
             <a-tag class="soft-tag">{{ record.groupName || record.groupCode }}</a-tag>
           </template>
           <template v-else-if="column.key === 'value'">
-            <code :class="valueClass(record.valueType)">{{ displayValue(toRecord(record)) }}</code>
+            <div class="value-cell" :class="{ sensitive: isSensitiveConfig(toRecord(record)) }">
+              <code :class="valueClass(record.valueType)">{{ displayValue(toRecord(record)) }}</code>
+              <a-tag v-if="isSensitiveConfig(toRecord(record))" class="secret-tag">
+                <template #icon><LockOutlined /></template>
+                敏感
+              </a-tag>
+            </div>
           </template>
           <template v-else-if="column.key === 'type'">
             <span class="type-text">{{ record.valueTypeDesc || record.valueType }}</span>
@@ -511,6 +671,13 @@ function formatSize(value?: number) {
           <a-col :span="24">
             <a-form-item name="configValue" label="配置值">
               <a-textarea v-model:value="formState.configValue" :rows="4" placeholder="按所选类型填写配置值" />
+              <a-alert
+                v-if="sensitiveHint(currentConfig)"
+                class="sensitive-alert"
+                type="warning"
+                show-icon
+                :message="sensitiveHint(currentConfig)"
+              />
             </a-form-item>
           </a-col>
           <a-col :span="24">
@@ -681,6 +848,88 @@ function formatSize(value?: number) {
   box-shadow: 0 10px 28px rgba(20, 31, 43, 0.06);
 }
 
+.payment-summary-panel {
+  margin-bottom: 16px;
+  padding: 18px;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(20, 31, 43, 0.06);
+}
+
+.payment-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.payment-summary-head h2 {
+  margin: 0;
+  color: #17212b;
+  font-size: 20px;
+}
+
+.summary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.summary-percent {
+  min-width: 92px;
+  padding: 12px 14px;
+  border-radius: 999px;
+  background: #edf7f4;
+  color: #0f766e;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+}
+
+.summary-percent.warning {
+  background: #fff6e9;
+  color: #b7791f;
+}
+
+.payment-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.payment-summary-grid > div {
+  padding: 14px;
+  border: 1px solid #edf1f6;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.payment-summary-grid span {
+  display: block;
+  color: #657384;
+  font-size: 12px;
+}
+
+.payment-summary-grid strong {
+  display: block;
+  margin-top: 8px;
+  color: #17212b;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.payment-summary-grid .danger {
+  border-color: #f7d9df;
+  background: #fff7f8;
+}
+
+.payment-summary-grid .danger strong {
+  color: #be365d;
+}
+
 .storage-head {
   display: flex;
   align-items: flex-start;
@@ -833,6 +1082,32 @@ function formatSize(value?: number) {
   white-space: nowrap;
 }
 
+.value-cell {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+
+.value-cell.sensitive .value-pill {
+  border: 1px dashed #f2c7ce;
+  background: #fff7f8;
+  color: #9f2947;
+}
+
+.secret-tag {
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #fff1f2;
+  color: #be365d;
+  font-weight: 700;
+}
+
+.sensitive-alert {
+  margin-top: 8px;
+}
+
 .value-number {
   background: #fff7e6;
   color: #8a5a12;
@@ -872,6 +1147,19 @@ function formatSize(value?: number) {
     flex-direction: column;
   }
 
+  .payment-summary-head {
+    flex-direction: column;
+  }
+
+  .summary-actions {
+    align-items: flex-start;
+    flex-direction: column-reverse;
+  }
+
+  .payment-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .storage-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -888,6 +1176,10 @@ function formatSize(value?: number) {
   }
 
   .storage-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-summary-grid {
     grid-template-columns: 1fr;
   }
 

@@ -38,8 +38,36 @@ export interface SystemConfigRecord {
   editable: number
   status: number
   statusDesc?: string
+  sensitive?: boolean
+  masked?: boolean
   createTime?: string
   updateTime?: string
+}
+
+export interface ConfigGroupSummary {
+  groupCode: string
+  groupName?: string
+  totalCount: number
+  requiredCount: number
+  readyCount: number
+  enabledCount: number
+  filledCount: number
+  missingCount: number
+  uninitializedCount?: number
+  sensitiveCount: number
+  completenessPercent: number
+  missingKeys?: string[]
+  uninitializedKeys?: string[]
+}
+
+export interface ConfigInitResult {
+  groupCode: string
+  createdCount: number
+  restoredCount?: number
+  existingCount: number
+  createdKeys?: string[]
+  restoredKeys?: string[]
+  existingKeys?: string[]
 }
 
 export interface SystemConfigPayload {
@@ -89,6 +117,16 @@ export interface UploadCleanupResult {
 
 export function getSystemConfigPage(params: SystemConfigQuery) {
   return request.get<ApiResult<PageResult<SystemConfigRecord>>>('/api/admin/sys/config/page', { params })
+}
+
+export function getSystemConfigSummary(groupCode: string) {
+  return request.get<ApiResult<ConfigGroupSummary>>('/api/admin/sys/config/summary', {
+    params: { groupCode },
+  })
+}
+
+export function initializePaymentConfigs() {
+  return request.post<ApiResult<ConfigInitResult>>('/api/admin/sys/config/payment/initialize')
 }
 
 export function getSystemConfigDetail(id: ApiId) {

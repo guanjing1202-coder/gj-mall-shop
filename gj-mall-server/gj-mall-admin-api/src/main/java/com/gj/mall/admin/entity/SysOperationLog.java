@@ -25,6 +25,7 @@ public class SysOperationLog implements Serializable {
     private String requestMethod;
     private String requestUri;
     private String requestParams;
+    private String requestSummary;
     private String ip;
     private Integer status;
     private String errorMessage;

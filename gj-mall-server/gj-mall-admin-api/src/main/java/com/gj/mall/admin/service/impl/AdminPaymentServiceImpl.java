@@ -27,19 +27,19 @@ import com.gj.mall.order.mapper.PayCallbackRecordMapper;
 import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.mapper.PayRefundRecordMapper;
 import com.gj.mall.order.service.OrderService;
-import com.gj.mall.pay.config.PayCallbackProperties;
+import com.gj.mall.pay.config.PayRuntimeConfigService;
 import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.user.entity.UmsUser;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import com.gj.mall.user.service.UserMessageService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URI;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -49,6 +49,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AdminPaymentServiceImpl implements AdminPaymentService {
 
+    private static final String WECHAT_CALLBACK_PATH = "/api/pay/callback/wechat";
+    private static final String ALIPAY_CALLBACK_PATH = "/api/pay/callback/alipay";
+    private static final String WECHAT_NOTIFY_HTTPS_TIP = "请将 mall.pay.wechat.notify-url 配置为 https:// 开头的有效地址";
+    private static final String WECHAT_NOTIFY_PATH_TIP = "请将 mall.pay.wechat.notify-url 指向 " + WECHAT_CALLBACK_PATH;
+    private static final String ALIPAY_NOTIFY_HTTPS_TIP = "请将 mall.pay.alipay.notify-url 配置为 https:// 开头的有效地址";
+    private static final String ALIPAY_NOTIFY_PATH_TIP = "请将 mall.pay.alipay.notify-url 指向 " + ALIPAY_CALLBACK_PATH;
+
     private final PayPaymentRecordMapper recordMapper;
     private final PayCallbackRecordMapper callbackRecordMapper;
     private final PayRefundRecordMapper refundRecordMapper;
@@ -57,14 +64,8 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
     private final OrderService orderService;
     private final PayService payService;
     private final PayCallbackSignatureSupport signatureSupport;
-    private final PayCallbackProperties callbackProperties;
+    private final PayRuntimeConfigService runtimeConfigService;
     private final UserMessageService messageService;
-
-    @Value("${mall.pay.mode:mock}")
-    private String payMode;
-
-    @Value("${mall.pay.callback.require-signature:false}")
-    private Boolean requireSignature;
 
     @Override
     public AdminPaymentSummaryVO summary() {
@@ -94,18 +95,24 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
     @Override
     public AdminPaymentAccessVO access() {
         AdminPaymentAccessVO vo = new AdminPaymentAccessVO();
+        String payMode = runtimeConfigService.mode();
+        boolean requireSignature = runtimeConfigService.callbackRequireSignature();
         vo.setMode(payMode);
-        vo.setCallbackRequireSignature(Boolean.TRUE.equals(requireSignature));
+        vo.setCallbackRequireSignature(requireSignature);
         vo.setCallbackPath("/api/pay/callback/{channel}");
         vo.setDevSignatureAlgorithm("HmacSHA256(sortedPayload, mall.pay.callback.secret)");
         fillDevSignatureSample(vo);
         boolean realMode = "real".equalsIgnoreCase(payMode);
+        List<String> tips = buildAccessReadinessTips(realMode);
+        vo.setReady(tips.isEmpty());
+        vo.setReadinessText(tips.isEmpty() ? (realMode ? "真实支付配置已就绪" : "Mock 支付模式") : "真实支付配置未就绪");
+        vo.setReadinessTips(tips);
         vo.getChannels().add(AdminPaymentAccessVO.ChannelItem.of(
                 PayChannel.MOCK.getCode(), PayChannel.MOCK.getName(), PayChannel.MOCK.getDesc(), true, "开发环境即时成功"));
         vo.getChannels().add(AdminPaymentAccessVO.ChannelItem.of(
-                PayChannel.WECHAT.getCode(), PayChannel.WECHAT.getName(), PayChannel.WECHAT.getDesc(), realMode, realMode ? "待接入商户配置" : "未启用"));
+                PayChannel.WECHAT.getCode(), PayChannel.WECHAT.getName(), PayChannel.WECHAT.getDesc(), realMode, wechatChannelStatus(realMode)));
         vo.getChannels().add(AdminPaymentAccessVO.ChannelItem.of(
-                PayChannel.ALIPAY.getCode(), PayChannel.ALIPAY.getName(), PayChannel.ALIPAY.getDesc(), realMode, realMode ? "待接入应用配置" : "未启用"));
+                PayChannel.ALIPAY.getCode(), PayChannel.ALIPAY.getName(), PayChannel.ALIPAY.getDesc(), realMode, alipayChannelStatus(realMode)));
         return vo;
     }
 
@@ -640,6 +647,135 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         }
     }
 
+    private List<String> buildAccessReadinessTips(boolean realMode) {
+        if (!realMode) {
+            return Collections.emptyList();
+        }
+        List<String> tips = new ArrayList<>();
+        if (!runtimeConfigService.callbackRequireSignature()) {
+            tips.add("真实支付模式建议开启 mall.pay.callback.require-signature");
+        }
+        if (StrUtil.isBlank(runtimeConfigService.callbackSecret())) {
+            tips.add("请配置 mall.pay.callback.secret");
+        } else if (runtimeConfigService.usingDefaultCallbackSecret()) {
+            tips.add("请替换默认开发回调密钥 mall.pay.callback.secret");
+        }
+        List<String> missingWechatKeys = missingWechatKeys();
+        missingWechatKeys.forEach(key -> tips.add("请配置 mall.pay.wechat." + key));
+        if (missingWechatKeys.isEmpty() && !runtimeConfigService.wechatPrivateKeyFileReadable()) {
+            tips.add("请确认 mall.pay.wechat.private-key-path 文件存在且服务进程可读取");
+        }
+        tips.addAll(notifyUrlReadinessTips(runtimeConfigService.wechatNotifyUrl(),
+                WECHAT_NOTIFY_HTTPS_TIP,
+                WECHAT_NOTIFY_PATH_TIP,
+                WECHAT_CALLBACK_PATH));
+        missingAlipayKeys().forEach(key -> tips.add("请配置 mall.pay.alipay." + key));
+        tips.addAll(notifyUrlReadinessTips(runtimeConfigService.alipayNotifyUrl(),
+                ALIPAY_NOTIFY_HTTPS_TIP,
+                ALIPAY_NOTIFY_PATH_TIP,
+                ALIPAY_CALLBACK_PATH));
+        return tips;
+    }
+
+    private String wechatChannelStatus(boolean realMode) {
+        if (!realMode) {
+            return "未启用";
+        }
+        List<String> missing = missingWechatKeys();
+        if (!missing.isEmpty()) {
+            return "缺少 " + String.join("、", missing);
+        }
+        NotifyUrlValidation validation = validateNotifyUrl(runtimeConfigService.wechatNotifyUrl(), WECHAT_CALLBACK_PATH);
+        if (!validation.httpsValid) {
+            return "回调地址需使用 HTTPS";
+        }
+        if (!validation.pathValid) {
+            return "回调地址路径需为 " + WECHAT_CALLBACK_PATH;
+        }
+        return runtimeConfigService.wechatPrivateKeyFileReadable()
+                ? "商户配置已填写，私钥文件可读取，等待 SDK 接入"
+                : "私钥文件不可读";
+    }
+
+    private String alipayChannelStatus(boolean realMode) {
+        if (!realMode) {
+            return "未启用";
+        }
+        List<String> missing = missingAlipayKeys();
+        if (!missing.isEmpty()) {
+            return "缺少 " + String.join("、", missing);
+        }
+        NotifyUrlValidation validation = validateNotifyUrl(runtimeConfigService.alipayNotifyUrl(), ALIPAY_CALLBACK_PATH);
+        if (!validation.httpsValid) {
+            return "回调地址需使用 HTTPS";
+        }
+        if (!validation.pathValid) {
+            return "回调地址路径需为 " + ALIPAY_CALLBACK_PATH;
+        }
+        return "应用配置已填写，等待 SDK 接入";
+    }
+
+    private List<String> missingWechatKeys() {
+        List<String> missing = new ArrayList<>();
+        addMissing(missing, "app-id", runtimeConfigService.wechatAppId());
+        addMissing(missing, "mch-id", runtimeConfigService.wechatMchId());
+        addMissing(missing, "api-v3-key", runtimeConfigService.wechatApiV3Key());
+        addMissing(missing, "merchant-serial-no", runtimeConfigService.wechatMerchantSerialNo());
+        addMissing(missing, "private-key-path", runtimeConfigService.wechatPrivateKeyPath());
+        addMissing(missing, "notify-url", runtimeConfigService.wechatNotifyUrl());
+        return missing;
+    }
+
+    private List<String> missingAlipayKeys() {
+        List<String> missing = new ArrayList<>();
+        addMissing(missing, "app-id", runtimeConfigService.alipayAppId());
+        addMissing(missing, "private-key", runtimeConfigService.alipayPrivateKey());
+        addMissing(missing, "alipay-public-key", runtimeConfigService.alipayPublicKey());
+        addMissing(missing, "notify-url", runtimeConfigService.alipayNotifyUrl());
+        return missing;
+    }
+
+    private void addMissing(List<String> missing, String key, String value) {
+        if (StrUtil.isBlank(value)) {
+            missing.add(key);
+        }
+    }
+
+    private List<String> notifyUrlReadinessTips(String notifyUrl, String httpsTip, String pathTip, String expectedPath) {
+        if (StrUtil.isBlank(notifyUrl)) {
+            return Collections.emptyList();
+        }
+        NotifyUrlValidation validation = validateNotifyUrl(notifyUrl, expectedPath);
+        List<String> tips = new ArrayList<>();
+        if (!validation.httpsValid) {
+            tips.add(httpsTip);
+        } else if (!validation.pathValid) {
+            tips.add(pathTip);
+        }
+        return tips;
+    }
+
+    private NotifyUrlValidation validateNotifyUrl(String notifyUrl, String expectedPath) {
+        try {
+            URI uri = URI.create(StrUtil.trim(notifyUrl));
+            boolean httpsValid = "https".equalsIgnoreCase(uri.getScheme()) && StrUtil.isNotBlank(uri.getHost());
+            boolean pathValid = expectedPath.equals(uri.getPath());
+            return new NotifyUrlValidation(httpsValid, pathValid);
+        } catch (Exception ex) {
+            return new NotifyUrlValidation(false, false);
+        }
+    }
+
+    private static class NotifyUrlValidation {
+        private final boolean httpsValid;
+        private final boolean pathValid;
+
+        private NotifyUrlValidation(boolean httpsValid, boolean pathValid) {
+            this.httpsValid = httpsValid;
+            this.pathValid = pathValid;
+        }
+    }
+
     private void fillDevSignatureSample(AdminPaymentAccessVO vo) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("amount", "99.00");
@@ -647,10 +783,12 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         payload.put("notifyId", "N202605220001");
         payload.put("payNo", "P202605220001");
         payload.put("thirdPayNo", "MOCK-P202605220001");
-        String signature = signatureSupport.sign(payload, callbackProperties.getSecret());
         vo.setDevSignatureHeader("x-gj-pay-signature");
         vo.setDevSignaturePayload(signatureSupport.canonicalPayload(payload));
-        vo.setDevSignature(signature);
+        String callbackSecret = runtimeConfigService.callbackSecret();
+        vo.setDevSignature(StrUtil.isBlank(callbackSecret)
+                ? ""
+                : signatureSupport.sign(payload, callbackSecret));
         vo.setDevCallbackExample("{\"payNo\":\"P202605220001\",\"thirdPayNo\":\"MOCK-P202605220001\",\"notifyId\":\"N202605220001\",\"eventType\":\"SUCCESS\",\"amount\":\"99.00\"}");
     }
 }

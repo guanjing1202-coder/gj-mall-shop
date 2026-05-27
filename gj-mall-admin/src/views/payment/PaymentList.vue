@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import type { TableColumnsType } from 'ant-design-vue'
 import {
@@ -36,8 +36,17 @@ import {
   paymentRefundHint,
   paymentSyncStatusHint,
 } from '@/utils/payment-action-ui'
+import {
+  paymentAccessTipItems,
+  paymentAccessTips,
+  paymentAccessTitle,
+  paymentAccessTone,
+  paymentConfigRouteQuery,
+  type PaymentAccessTipItem,
+} from '@/utils/payment-access-ui'
 
 const route = useRoute()
+const router = useRouter()
 const loading = ref(false)
 const summaryLoading = ref(false)
 const detailLoading = ref(false)
@@ -160,6 +169,11 @@ const signatureSampleLines = computed(() => formatCallbackSignatureSample({
   signatureHeader: access.value.devSignatureHeader,
   signature: access.value.devSignature,
 }))
+
+const accessTone = computed(() => paymentAccessTone(access.value))
+const accessTitle = computed(() => paymentAccessTitle(access.value))
+const accessTips = computed(() => paymentAccessTips(access.value))
+const accessTipItems = computed(() => paymentAccessTipItems(access.value))
 
 const callbackStatusCards = computed(() => {
   const handled = callbacks.value.filter((item) => item.processStatus === 1).length
@@ -597,6 +611,9 @@ function createEmptySummary(): PaymentSummary {
 function createEmptyAccess(): PaymentAccess {
   return {
     mode: 'mock',
+    ready: true,
+    readinessText: 'Mock 支付模式',
+    readinessTips: [],
     callbackRequireSignature: false,
     callbackPath: '/api/pay/callback/{channel}',
     devSignatureAlgorithm: 'HmacSHA256(sortedPayload, mall.pay.callback.secret)',
@@ -620,21 +637,40 @@ function signatureStatusColor(status?: number) {
   if (status === 2) return 'error'
   return 'default'
 }
+
+function goPaymentConfig(tip?: PaymentAccessTipItem) {
+  router.push({
+    name: 'SystemConfig',
+    query: paymentConfigRouteQuery(tip),
+  })
+}
 </script>
 
 <template>
   <a-card title="支付退款管理" :bordered="false">
     <a-spin :spinning="summaryLoading">
-      <section class="access-panel">
+      <section class="access-panel" :class="`access-panel--${accessTone}`">
         <div class="access-main">
           <span>支付接入状态</span>
-          <strong>{{ access.mode === 'real' ? '真实支付模式' : 'Mock 支付模式' }}</strong>
+          <strong>{{ accessTitle }}</strong>
           <small>回调入口：{{ access.callbackPath }} / {{ access.callbackRequireSignature ? '强制验签' : '开发环境允许无签名' }}</small>
         </div>
         <div class="access-channels">
           <a-tag v-for="item in access.channels" :key="item.name" :color="item.enabled ? 'green' : 'default'">
             {{ item.desc }} · {{ item.status }}
           </a-tag>
+        </div>
+        <div v-if="accessTipItems.length" class="access-tips">
+          <button
+            v-for="tip in accessTipItems.slice(0, 6)"
+            :key="tip.text"
+            type="button"
+            @click="goPaymentConfig(tip)"
+          >
+            {{ tip.text }}
+          </button>
+          <em v-if="accessTips.length > 6">还有 {{ accessTips.length - 6 }} 项配置待补齐</em>
+          <a-button size="small" type="link" @click="goPaymentConfig()">打开支付配置</a-button>
         </div>
       </section>
 
@@ -1071,6 +1107,26 @@ function signatureStatusColor(status?: number) {
   background: #fbfcff;
 }
 
+.access-panel--mock {
+  border-color: #dbeafe;
+  background: #f8fbff;
+}
+
+.access-panel--ready {
+  border-color: #bbf7d0;
+  background: #f7fef9;
+}
+
+.access-panel--warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.access-panel--danger {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
 .access-main span,
 .access-main small,
 .callback-tip span,
@@ -1092,6 +1148,38 @@ function signatureStatusColor(status?: number) {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.access-tips {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.access-tips button,
+.access-tips em {
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #991b1b;
+  cursor: pointer;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.4;
+}
+
+.access-tips button:hover {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.access-tips em {
+  color: #64748b;
+  cursor: default;
 }
 
 .callback-health {
