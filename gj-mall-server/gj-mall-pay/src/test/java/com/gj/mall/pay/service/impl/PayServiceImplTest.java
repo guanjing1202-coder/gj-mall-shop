@@ -236,6 +236,87 @@ class PayServiceImplTest {
                         && "TRADE_SUCCESS".equals(callback.getEventType())));
     }
 
+    @Test
+    void handleAlipayCallbackRejectsMismatchedRuntimeAppId() throws Exception {
+        OrderService orderService = mock(OrderService.class);
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRuntimeConfigService runtimeConfigService = mock(PayRuntimeConfigService.class);
+        PayCallbackSignatureSupport signatureSupport = new PayCallbackSignatureSupport();
+        PayServiceImpl service = new PayServiceImpl(
+                Collections.<PayStrategy>emptyList(),
+                orderService,
+                recordMapper,
+                callbackRecordMapper,
+                new PayCallbackProperties(),
+                runtimeConfigService,
+                signatureSupport,
+                new PayCallbackEventSupport(),
+                new ObjectMapper(),
+                transactionManager);
+
+        KeyPair keyPair = rsaKeyPair();
+        Map<String, Object> payload = alipayCallbackPayload();
+        payload.put("sign", rsaSign(signatureSupport.alipayCanonicalPayload(payload), keyPair));
+        PayPaymentRecord payment = pendingPayment();
+        payment.setChannel(2);
+        when(runtimeConfigService.callbackRequireSignature()).thenReturn(true);
+        when(runtimeConfigService.alipayPublicKey()).thenReturn(publicKeyPem(keyPair));
+        when(runtimeConfigService.alipayAppId()).thenReturn("2021000999999999");
+        when(recordMapper.selectOne(any())).thenReturn(payment);
+
+        BizException error = assertThrows(BizException.class,
+                () -> service.handleCallback("alipay", payload, Collections.emptyMap()));
+
+        assertTrue(error.getMessage().contains("支付宝回调 AppID"));
+        verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
+        verify(orderService, never()).markPaid(any(), any());
+        verify(callbackRecordMapper).insert(argThat(callback ->
+                Integer.valueOf(3).equals(callback.getProcessStatus())
+                        && callback.getErrorMessage().contains("支付宝回调 AppID")));
+    }
+
+    @Test
+    void handleAlipayCallbackRejectsMismatchedAmountAfterSignaturePasses() throws Exception {
+        OrderService orderService = mock(OrderService.class);
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRuntimeConfigService runtimeConfigService = mock(PayRuntimeConfigService.class);
+        PayCallbackSignatureSupport signatureSupport = new PayCallbackSignatureSupport();
+        PayServiceImpl service = new PayServiceImpl(
+                Collections.<PayStrategy>emptyList(),
+                orderService,
+                recordMapper,
+                callbackRecordMapper,
+                new PayCallbackProperties(),
+                runtimeConfigService,
+                signatureSupport,
+                new PayCallbackEventSupport(),
+                new ObjectMapper(),
+                transactionManager);
+
+        KeyPair keyPair = rsaKeyPair();
+        Map<String, Object> payload = alipayCallbackPayload();
+        payload.put("total_amount", "98.99");
+        payload.put("sign", rsaSign(signatureSupport.alipayCanonicalPayload(payload), keyPair));
+        PayPaymentRecord payment = pendingPayment();
+        payment.setChannel(2);
+        when(runtimeConfigService.callbackRequireSignature()).thenReturn(true);
+        when(runtimeConfigService.alipayPublicKey()).thenReturn(publicKeyPem(keyPair));
+        when(runtimeConfigService.alipayAppId()).thenReturn("2021000123456789");
+        when(recordMapper.selectOne(any())).thenReturn(payment);
+
+        BizException error = assertThrows(BizException.class,
+                () -> service.handleCallback("alipay", payload, Collections.emptyMap()));
+
+        assertTrue(error.getMessage().contains("回调金额 98.99 与支付流水金额 99.00 不一致"));
+        verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
+        verify(orderService, never()).markPaid(any(), any());
+        verify(callbackRecordMapper).insert(argThat(callback ->
+                Integer.valueOf(3).equals(callback.getProcessStatus())
+                        && Integer.valueOf(1).equals(callback.getSignatureStatus())));
+    }
+
     private PayCallbackRecord failedCallback() {
         PayCallbackRecord record = new PayCallbackRecord();
         record.setId(10L);

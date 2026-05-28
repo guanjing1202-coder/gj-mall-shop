@@ -214,6 +214,7 @@ public class PayServiceImpl implements PayService {
             if (!payChannel.getCode().equals(record.getChannel())) {
                 throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT, "回调渠道与支付流水渠道不一致");
             }
+            validateChannelPayload(payChannel, safePayload);
             if (Integer.valueOf(1).equals(record.getStatus())) {
                 callbackRecord.setProcessStatus(2);
                 result.setProcessed(false);
@@ -279,6 +280,21 @@ public class PayServiceImpl implements PayService {
                     "未找到支付流水：" + firstNonBlank(payNo, thirdPayNo, notifyId, "-"));
         }
         return record;
+    }
+
+    private void validateChannelPayload(PayChannel payChannel, Map<String, Object> payload) {
+        if (!PayChannel.ALIPAY.equals(payChannel) || runtimeConfigService == null) {
+            return;
+        }
+        String configuredAppId = firstNonBlank(runtimeConfigService.alipayAppId());
+        if (configuredAppId == null) {
+            return;
+        }
+        String callbackAppId = firstText(payload, "app_id", "appId");
+        if (!configuredAppId.equals(callbackAppId)) {
+            throw new BizException(ResultCode.PAY_FAIL,
+                    "支付宝回调 AppID " + firstNonBlank(callbackAppId, "-") + " 与当前配置不一致");
+        }
     }
 
     private String firstText(Map<String, Object> payload, String... keys) {
