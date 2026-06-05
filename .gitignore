@@ -11,6 +11,8 @@ unpackage/
 # Logs and local runtime files
 logs/
 *.log
+server_log.txt
+*.dump
 .run.log
 dump.rdb
 uploads/

@@ -6,7 +6,9 @@ import com.gj.mall.framework.security.AuthExclude;
 import com.gj.mall.pay.dto.PayDTO;
 import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.vo.PayCallbackResultVO;
+import com.gj.mall.pay.vo.PayChannelVO;
 import com.gj.mall.pay.vo.PayResultVO;
+import com.gj.mall.pay.vo.PayStatusVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Tag(name = "15-支付", description = "支付（mock/wechat/alipay）")
@@ -28,6 +31,18 @@ public class PayController {
     @PostMapping
     public Result<PayResultVO> pay(@Valid @RequestBody PayDTO dto) {
         return Result.success(payService.pay(UserContext.getUserId(), dto));
+    }
+
+    @Operation(summary = "查询用户侧支付渠道")
+    @GetMapping("/channels")
+    public Result<List<PayChannelVO>> channels() {
+        return Result.success(payService.listChannels());
+    }
+
+    @Operation(summary = "查询支付状态")
+    @GetMapping("/{payNo}/status")
+    public Result<PayStatusVO> status(@PathVariable String payNo) {
+        return Result.success(payService.getStatus(UserContext.getUserId(), payNo));
     }
 
     @Operation(summary = "支付回调（开发用，模拟第三方异步通知）")

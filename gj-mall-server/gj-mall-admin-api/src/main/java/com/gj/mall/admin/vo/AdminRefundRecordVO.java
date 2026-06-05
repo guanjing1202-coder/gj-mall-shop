@@ -2,6 +2,7 @@ package com.gj.mall.admin.vo;
 
 import com.gj.mall.order.entity.PayRefundRecord;
 import com.gj.mall.order.enums.PayChannel;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -32,6 +33,8 @@ public class AdminRefundRecordVO {
     private LocalDateTime successTime;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
+    @JsonIgnore
+    private PayRefundRecord rawRecord;
 
     public static AdminRefundRecordVO from(PayRefundRecord record) {
         if (record == null) {
@@ -59,6 +62,7 @@ public class AdminRefundRecordVO {
         vo.setSuccessTime(record.getSuccessTime());
         vo.setCreateTime(record.getCreateTime());
         vo.setUpdateTime(record.getUpdateTime());
+        vo.setRawRecord(record);
         return vo;
     }
 

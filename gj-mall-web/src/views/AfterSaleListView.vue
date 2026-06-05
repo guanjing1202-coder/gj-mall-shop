@@ -11,6 +11,7 @@ import {
   type OrderItem,
 } from '@/api/order'
 import { useAuthStore } from '@/stores/auth'
+import { refundRecordMeta, refundRecordNotice, refundRecordTitle } from '@/utils/after-sale-ui'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -246,9 +247,13 @@ onMounted(loadAfterSales)
               <span v-if="item.auditRemark">审核备注：{{ item.auditRemark }}</span>
               <span v-if="item.rejectReason">拒绝原因：{{ item.rejectReason }}</span>
               <span v-if="item.returnCompany || item.returnNo">退货物流：{{ item.returnCompany || '-' }} {{ item.returnNo || '' }}</span>
+              <span v-if="refundRecordTitle(item.refundRecord)">退款记录：{{ refundRecordTitle(item.refundRecord) }}</span>
+              <span v-if="refundRecordMeta(item.refundRecord)">退款摘要：{{ refundRecordMeta(item.refundRecord) }}</span>
+              <span v-if="refundRecordNotice(item.refundRecord)">退款进度：{{ refundRecordNotice(item.refundRecord) }}</span>
             </div>
 
             <div class="service-card__actions">
+              <el-button @click="router.push(`/after-sales/${item.id}`)">查看详情</el-button>
               <el-button @click="router.push(`/order/${item.orderId}`)">查看订单</el-button>
               <el-button v-if="Number(item.status) === 1" type="primary" @click="openReturnDialog(item)">
                 填写退货物流

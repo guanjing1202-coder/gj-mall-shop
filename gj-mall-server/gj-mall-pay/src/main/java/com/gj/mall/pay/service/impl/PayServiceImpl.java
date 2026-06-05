@@ -21,7 +21,9 @@ import com.gj.mall.pay.strategy.PayStrategy;
 import com.gj.mall.pay.support.PayCallbackEventSupport;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.pay.vo.PayCallbackResultVO;
+import com.gj.mall.pay.vo.PayChannelVO;
 import com.gj.mall.pay.vo.PayResultVO;
+import com.gj.mall.pay.vo.PayStatusVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -40,6 +42,9 @@ import java.util.concurrent.ThreadLocalRandom;
 @Service
 @RequiredArgsConstructor
 public class PayServiceImpl implements PayService {
+
+    private static final String WECHAT_CALLBACK_PATH = "/api/pay/callback/wechat";
+    private static final String ALIPAY_CALLBACK_PATH = "/api/pay/callback/alipay";
 
     private final List<PayStrategy> strategies;
     private final OrderService orderService;
@@ -76,6 +81,9 @@ public class PayServiceImpl implements PayService {
             throw new BizException(ResultCode.ORDER_PAID);
         }
 
+        PayChannel requestedChannel = PayChannel.ofName(dto.getChannel());
+        assertChannelEnabled(requestedChannel);
+
         PayStrategy strategy = strategyMap.get(dto.getChannel().toLowerCase());
         if (strategy == null) {
             throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT, "未知渠道：" + dto.getChannel());
@@ -108,6 +116,15 @@ public class PayServiceImpl implements PayService {
     }
 
     @Override
+    public List<PayChannelVO> listChannels() {
+        return Arrays.asList(
+                channel(PayChannel.MOCK, mockChannelEnabled(), mockChannelStatus()),
+                channel(PayChannel.WECHAT, wechatChannelEnabled(), wechatChannelStatus()),
+                channel(PayChannel.ALIPAY, alipayChannelEnabled(), alipayChannelStatus())
+        );
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public void notifyPaid(String payNo, String thirdPayNo, String rawCallback) {
         PayPaymentRecord record = recordMapper.selectOne(
@@ -119,6 +136,24 @@ public class PayServiceImpl implements PayService {
         }
         doMarkPaid(record, record.getChannel(), thirdPayNo, rawCallback);
         orderService.markPaid(record.getOrderId(), record.getChannel());
+    }
+
+    @Override
+    public PayStatusVO getStatus(Long userId, String payNo) {
+        if (payNo == null || payNo.trim().isEmpty()) {
+            throw new BizException(ResultCode.PARAM_ERROR, "支付流水号不能为空");
+        }
+        PayPaymentRecord record = recordMapper.selectOne(Wrappers.<PayPaymentRecord>lambdaQuery()
+                .eq(PayPaymentRecord::getPayNo, payNo.trim()));
+        if (record == null || !Objects.equals(record.getUserId(), userId)) {
+            throw new BizException(ResultCode.PAY_RECORD_NOT_FOUND);
+        }
+
+        OmsOrder order = orderService.getByIdOrThrow(record.getOrderId());
+        if (!Objects.equals(order.getUserId(), userId)) {
+            throw new BizException(ResultCode.PAY_RECORD_NOT_FOUND);
+        }
+        return toPayStatusVO(record, order);
     }
 
     @Override
@@ -263,6 +298,203 @@ public class PayServiceImpl implements PayService {
 
     private String genPayNo(String orderNo) {
         return "P" + orderNo + String.format("%04d", ThreadLocalRandom.current().nextInt(10000));
+    }
+
+    private PayStatusVO toPayStatusVO(PayPaymentRecord record, OmsOrder order) {
+        PayStatusVO vo = new PayStatusVO();
+        vo.setPayNo(record.getPayNo());
+        vo.setThirdPayNo(record.getThirdPayNo());
+        vo.setChannel(record.getChannel());
+        PayChannel channel = PayChannel.of(record.getChannel());
+        if (channel != null) {
+            vo.setChannelName(channel.getName());
+            vo.setChannelDesc(channel.getDesc());
+        }
+        vo.setPaid(Integer.valueOf(1).equals(record.getStatus()));
+        vo.setStatus(record.getStatus());
+        vo.setStatusDesc(paymentStatusDesc(record.getStatus()));
+        vo.setAmount(record.getAmount());
+        vo.setPayTime(record.getPayTime());
+        vo.setOrderId(record.getOrderId());
+        vo.setOrderNo(firstNonBlank(record.getOrderNo(), order.getOrderNo()));
+        vo.setOrderStatus(order.getStatus());
+        OrderStatus orderStatus = OrderStatus.of(order.getStatus());
+        vo.setOrderStatusDesc(orderStatus == null ? null : orderStatus.getDesc());
+        return vo;
+    }
+
+    private void assertChannelEnabled(PayChannel channel) {
+        if (channel == null) {
+            throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT);
+        }
+        PayChannelVO status = channel(channel, channelEnabled(channel), channelStatus(channel));
+        if (!Boolean.TRUE.equals(status.getEnabled())) {
+            throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT,
+                    status.getDesc() + "暂不可用：" + status.getStatus());
+        }
+    }
+
+    private PayChannelVO channel(PayChannel channel, boolean enabled, String status) {
+        PayChannelVO vo = new PayChannelVO();
+        vo.setChannel(channel.getCode());
+        vo.setName(channel.getName());
+        vo.setDesc(channel.getDesc());
+        vo.setEnabled(enabled);
+        vo.setStatus(status);
+        return vo;
+    }
+
+    private boolean channelEnabled(PayChannel channel) {
+        if (PayChannel.MOCK.equals(channel)) {
+            return mockChannelEnabled();
+        }
+        if (PayChannel.WECHAT.equals(channel)) {
+            return wechatChannelEnabled();
+        }
+        if (PayChannel.ALIPAY.equals(channel)) {
+            return alipayChannelEnabled();
+        }
+        return false;
+    }
+
+    private String channelStatus(PayChannel channel) {
+        if (PayChannel.MOCK.equals(channel)) {
+            return mockChannelStatus();
+        }
+        if (PayChannel.WECHAT.equals(channel)) {
+            return wechatChannelStatus();
+        }
+        if (PayChannel.ALIPAY.equals(channel)) {
+            return alipayChannelStatus();
+        }
+        return "暂不支持";
+    }
+
+    private boolean mockChannelEnabled() {
+        return !"real".equalsIgnoreCase(payMode());
+    }
+
+    private String mockChannelStatus() {
+        return mockChannelEnabled() ? "开发环境即时成功" : "真实支付模式下关闭模拟支付";
+    }
+
+    private boolean wechatChannelEnabled() {
+        return "real".equalsIgnoreCase(payMode())
+                && missingWechatKeys().isEmpty()
+                && notifyUrlValid(runtimeConfigService == null ? "" : runtimeConfigService.wechatNotifyUrl(), WECHAT_CALLBACK_PATH)
+                && runtimeConfigService != null
+                && runtimeConfigService.wechatPrivateKeyFileReadable();
+    }
+
+    private String wechatChannelStatus() {
+        if (!"real".equalsIgnoreCase(payMode())) {
+            return "当前为 mock 支付模式，真实微信支付未启用";
+        }
+        List<String> missing = missingWechatKeys();
+        if (!missing.isEmpty()) {
+            return "缺少 mall.pay.wechat." + String.join("、mall.pay.wechat.", missing);
+        }
+        if (!notifyUrlValid(runtimeConfigService.wechatNotifyUrl(), WECHAT_CALLBACK_PATH)) {
+            return "回调地址需使用 HTTPS 且路径为 " + WECHAT_CALLBACK_PATH;
+        }
+        if (!runtimeConfigService.wechatPrivateKeyFileReadable()) {
+            return "商户私钥文件不可读";
+        }
+        return "可用";
+    }
+
+    private boolean alipayChannelEnabled() {
+        return "real".equalsIgnoreCase(payMode())
+                && missingAlipayKeys().isEmpty()
+                && notifyUrlValid(runtimeConfigService == null ? "" : runtimeConfigService.alipayNotifyUrl(), ALIPAY_CALLBACK_PATH);
+    }
+
+    private String alipayChannelStatus() {
+        if (!"real".equalsIgnoreCase(payMode())) {
+            return "当前为 mock 支付模式，真实支付宝未启用";
+        }
+        List<String> missing = missingAlipayKeys();
+        if (!missing.isEmpty()) {
+            return "缺少 mall.pay.alipay." + String.join("、mall.pay.alipay.", missing);
+        }
+        if (!notifyUrlValid(runtimeConfigService.alipayNotifyUrl(), ALIPAY_CALLBACK_PATH)) {
+            return "回调地址需使用 HTTPS 且路径为 " + ALIPAY_CALLBACK_PATH;
+        }
+        return "可用";
+    }
+
+    private List<String> missingWechatKeys() {
+        List<String> missing = new ArrayList<>();
+        if (runtimeConfigService == null) {
+            missing.add("app-id");
+            missing.add("mch-id");
+            missing.add("api-v3-key");
+            missing.add("merchant-serial-no");
+            missing.add("private-key-path");
+            missing.add("notify-url");
+            return missing;
+        }
+        addMissing(missing, "app-id", runtimeConfigService.wechatAppId());
+        addMissing(missing, "mch-id", runtimeConfigService.wechatMchId());
+        addMissing(missing, "api-v3-key", runtimeConfigService.wechatApiV3Key());
+        addMissing(missing, "merchant-serial-no", runtimeConfigService.wechatMerchantSerialNo());
+        addMissing(missing, "private-key-path", runtimeConfigService.wechatPrivateKeyPath());
+        addMissing(missing, "notify-url", runtimeConfigService.wechatNotifyUrl());
+        return missing;
+    }
+
+    private List<String> missingAlipayKeys() {
+        List<String> missing = new ArrayList<>();
+        if (runtimeConfigService == null) {
+            missing.add("app-id");
+            missing.add("private-key");
+            missing.add("alipay-public-key");
+            missing.add("notify-url");
+            return missing;
+        }
+        addMissing(missing, "app-id", runtimeConfigService.alipayAppId());
+        addMissing(missing, "private-key", runtimeConfigService.alipayPrivateKey());
+        addMissing(missing, "alipay-public-key", runtimeConfigService.alipayPublicKey());
+        addMissing(missing, "notify-url", runtimeConfigService.alipayNotifyUrl());
+        return missing;
+    }
+
+    private void addMissing(List<String> missing, String key, String value) {
+        if (value == null || value.trim().isEmpty()) {
+            missing.add(key);
+        }
+    }
+
+    private boolean notifyUrlValid(String notifyUrl, String expectedPath) {
+        try {
+            java.net.URI uri = java.net.URI.create(notifyUrl == null ? "" : notifyUrl.trim());
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && uri.getHost() != null
+                    && !uri.getHost().trim().isEmpty()
+                    && expectedPath.equals(uri.getPath());
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private String payMode() {
+        return runtimeConfigService == null ? "mock" : runtimeConfigService.mode();
+    }
+
+    private String paymentStatusDesc(Integer status) {
+        if (Integer.valueOf(0).equals(status)) {
+            return "待支付";
+        }
+        if (Integer.valueOf(1).equals(status)) {
+            return "已支付";
+        }
+        if (Integer.valueOf(2).equals(status)) {
+            return "支付失败";
+        }
+        if (Integer.valueOf(3).equals(status)) {
+            return "已退款";
+        }
+        return "未知";
     }
 
     private PayPaymentRecord loadRecord(String payNo, String thirdPayNo, String notifyId) {

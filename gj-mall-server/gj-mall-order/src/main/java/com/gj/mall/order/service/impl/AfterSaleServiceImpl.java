@@ -14,10 +14,12 @@ import com.gj.mall.order.dto.OrderQueryDTO;
 import com.gj.mall.order.entity.OmsAfterSale;
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.entity.OmsOrderItem;
+import com.gj.mall.order.entity.PayRefundRecord;
 import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.order.mapper.OmsAfterSaleMapper;
 import com.gj.mall.order.mapper.OmsOrderItemMapper;
 import com.gj.mall.order.mapper.OmsOrderMapper;
+import com.gj.mall.order.mapper.PayRefundRecordMapper;
 import com.gj.mall.order.service.AfterSaleRuleService;
 import com.gj.mall.order.service.AfterSaleService;
 import com.gj.mall.order.vo.AfterSaleEligibilityVO;
@@ -49,6 +51,7 @@ public class AfterSaleServiceImpl implements AfterSaleService {
     private final OmsAfterSaleMapper afterSaleMapper;
     private final OmsOrderMapper orderMapper;
     private final OmsOrderItemMapper orderItemMapper;
+    private final PayRefundRecordMapper refundRecordMapper;
     private final UserMessageService messageService;
     private final AfterSaleRuleService ruleService;
 
@@ -126,6 +129,12 @@ public class AfterSaleServiceImpl implements AfterSaleService {
                 result.getCurrent(),
                 result.getSize(),
                 enrich(result.getRecords()));
+    }
+
+    @Override
+    public AfterSaleVO detail(Long userId, Long id) {
+        OmsAfterSale afterSale = mustOwnAfterSale(userId, id);
+        return enrich(Collections.singletonList(afterSale)).get(0);
     }
 
     @Override
@@ -215,9 +224,29 @@ public class AfterSaleServiceImpl implements AfterSaleService {
                         Wrappers.<OmsOrderItem>lambdaQuery().in(OmsOrderItem::getOrderId, orderIds))
                 .stream()
                 .collect(Collectors.groupingBy(OmsOrderItem::getOrderId));
+        Map<Long, PayRefundRecord> refundMap = refundRecordMap(afterSales);
         return afterSales.stream()
-                .map(item -> AfterSaleVO.from(item, itemMap.getOrDefault(item.getOrderId(), Collections.emptyList())))
+                .map(item -> AfterSaleVO.from(
+                        item,
+                        itemMap.getOrDefault(item.getOrderId(), Collections.emptyList()),
+                        refundMap.get(item.getId())))
                 .collect(Collectors.toList());
+    }
+
+    private Map<Long, PayRefundRecord> refundRecordMap(List<OmsAfterSale> afterSales) {
+        List<Long> afterSaleIds = afterSales.stream()
+                .map(OmsAfterSale::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(afterSaleIds)) {
+            return Collections.emptyMap();
+        }
+        return refundRecordMapper.selectList(Wrappers.<PayRefundRecord>lambdaQuery()
+                        .in(PayRefundRecord::getAfterSaleId, afterSaleIds)
+                        .orderByDesc(PayRefundRecord::getCreateTime))
+                .stream()
+                .collect(Collectors.toMap(PayRefundRecord::getAfterSaleId, item -> item, (a, b) -> a));
     }
 
     private String genAfterSaleNo(Long userId) {

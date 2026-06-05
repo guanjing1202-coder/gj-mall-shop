@@ -19,6 +19,8 @@ public interface AfterSaleService {
 
     PageResult<AfterSaleVO> page(Long userId, OrderQueryDTO query);
 
+    AfterSaleVO detail(Long userId, Long id);
+
     void cancel(Long userId, Long id);
 
     void submitReturn(Long userId, Long id, AfterSaleReturnDTO dto);

@@ -155,6 +155,38 @@ export interface AfterSale {
   createTime?: string
   updateTime?: string
   items?: AfterSaleItem[]
+  refundRecord?: AfterSaleRefundRecord
+  timeline?: AfterSaleTimelineItem[]
+}
+
+export interface AfterSaleTimelineItem {
+  title?: string
+  description?: string
+  time?: string
+  active?: boolean
+  tone?: string
+}
+
+export interface AfterSaleRefundRecord {
+  id?: ApiId
+  refundNo?: string
+  paymentId?: ApiId
+  payNo?: string
+  thirdPayNo?: string
+  afterSaleId?: ApiId
+  afterSaleNo?: string
+  orderId?: ApiId
+  orderNo?: string
+  channel?: number
+  channelDesc?: string
+  amount?: number
+  status?: number
+  statusDesc?: string
+  reason?: string
+  operatorType?: string
+  successTime?: string
+  createTime?: string
+  updateTime?: string
 }
 
 export interface CreateAfterSalePayload {
@@ -250,6 +282,10 @@ export function createAfterSale(orderId: ApiId, data: CreateAfterSalePayload) {
 
 export function getAfterSalePage(params: OrderQuery) {
   return request.get<ApiResult<PageResult<AfterSale>>>('/api/after-sale/page', { params })
+}
+
+export function getAfterSaleDetail(id: ApiId) {
+  return request.get<ApiResult<AfterSale>>(`/api/after-sale/${id}`)
 }
 
 export function cancelAfterSale(id: ApiId) {

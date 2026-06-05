@@ -5,6 +5,8 @@ import com.alibaba.fastjson2.TypeReference;
 import com.gj.mall.order.entity.OmsAfterSale;
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.entity.OmsOrderItem;
+import com.gj.mall.order.vo.AfterSaleTimelineBuilder;
+import com.gj.mall.order.vo.AfterSaleTimelineItemVO;
 import com.gj.mall.order.enums.OrderStatus;
 import com.gj.mall.user.entity.UmsUser;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -50,6 +52,7 @@ public class AdminAfterSaleVO {
     private Integer currentOrderStatus;
     private String currentOrderStatusDesc;
     private AdminRefundRecordVO refundRecord;
+    private List<AfterSaleTimelineItemVO> timeline;
     private List<OmsOrderItem> items;
 
     public static AdminAfterSaleVO from(
@@ -94,6 +97,7 @@ public class AdminAfterSaleVO {
         vo.setUpdateTime(afterSale.getUpdateTime());
         vo.setItems(items == null ? Collections.emptyList() : items);
         vo.setRefundRecord(refundRecord);
+        vo.setTimeline(AfterSaleTimelineBuilder.build(afterSale, refundRecord == null ? null : refundRecord.getRawRecord()));
         if (order != null) {
             vo.setOrderPayAmount(order.getPayAmount());
             vo.setCurrentOrderStatus(order.getStatus());

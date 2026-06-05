@@ -7,7 +7,13 @@ export interface PaymentActionState {
   orderStatus?: number
   refundAllowed?: boolean
   refundReason?: string
-  refundRecord?: unknown
+  refundRecord?: RefundActionState
+}
+
+export interface RefundActionState {
+  id?: string | number
+  status?: number
+  reason?: string
 }
 
 export function canSyncPaymentStatus(record?: PaymentActionState) {
@@ -36,6 +42,22 @@ export function canRefundPayment(record?: PaymentActionState) {
 
 export function paymentRefundHint(record?: PaymentActionState) {
   return record?.refundReason || ''
+}
+
+export function canRetryRefund(record?: PaymentActionState) {
+  const status = record?.refundRecord?.status
+  return status === 0 || status === 2
+}
+
+export function canMarkRefundFailed(record?: PaymentActionState) {
+  return record?.refundRecord?.status === 0
+}
+
+export function refundFailureHint(refund?: RefundActionState) {
+  if (refund?.status !== 2) {
+    return ''
+  }
+  return refund.reason ? `退款失败：${refund.reason}` : '退款失败，请检查渠道返回结果后重试'
 }
 
 export function isFullRefundAmount(inputAmount?: number, paymentAmount?: number) {

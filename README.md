@@ -43,19 +43,14 @@ gj-mall-shop/
 
 ## 本地环境
 
-当前本机已将项目依赖统一安装在 D 盘：
+当前本机项目依赖安装在 D 盘，仓库内脚本会优先使用以下默认位置：
 
 ```text
-D:\dev\gj-mall-deps
-├─ mysql
+D:\dev
 ├─ redis
 ├─ mongodb
 ├─ erlang
-├─ rabbitmq
-├─ mongosh-npm
-├─ data
-├─ logs
-└─ scripts
+└─ rabbitmq
 ```
 
 已安装组件：
@@ -78,18 +73,20 @@ D:\dev\gj-mall-deps
 
 ## 快速启动
 
-如果你在当前机器上运行，优先使用已经准备好的脚本：
+如果你在当前机器上运行，优先使用仓库内脚本：
 
 ```powershell
 # 启动 MySQL、Redis、MongoDB、RabbitMQ、后端、PC 商城、管理后台、Uni H5
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-all.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\start-all.ps1
 
 # 查看全部服务状态
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-all.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\status-all.ps1
 
-# 停止全部服务
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-all.ps1
+# 停止后端和三个前端 dev server
+PowerShell -ExecutionPolicy Bypass -File scripts\stop-all.ps1
 ```
+
+`start-deps.ps1` 会尝试启动 Redis、MongoDB、RabbitMQ。MySQL 因本机安装方式不固定，脚本只检查 `127.0.0.1:3306` 是否可用；如果未监听，需要先手动启动本机 MySQL 服务。
 
 启动成功后访问：
 
@@ -114,8 +111,8 @@ PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-all.ps
 如果拉取了新代码，建议重新导入最新测试数据：
 
 ```powershell
-$mysql = 'D:\dev\gj-mall-deps\mysql\bin\mysql.exe'
-$mongosh = 'D:\dev\gj-mall-deps\mongosh-npm\node_modules\.bin\mongosh.cmd'
+$mysql = '<你的 mysql.exe 路径>'
+$mongosh = '<你的 mongosh.cmd 路径>'
 
 & $mysql -uroot -p123456 -e "DROP DATABASE IF EXISTS gj_mall; CREATE DATABASE gj_mall DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
 cmd /c "`"$mysql`" -uroot -p123456 --default-character-set=utf8mb4 gj_mall < docs\db\01-schema.sql"
@@ -222,16 +219,16 @@ H5 默认端口：`5175`
 git pull --ff-only
 
 # 查看中间件状态
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-deps.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\status-deps.ps1
 
 # 只启动中间件
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-deps.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\start-deps.ps1
 
 # 只停止中间件
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-deps.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\stop-deps.ps1
 
 # 查看全部项目服务状态
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-all.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\status-all.ps1
 ```
 
 ## 鉴权说明
@@ -267,14 +264,14 @@ PayService
 先查看当前状态：
 
 ```powershell
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-all.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\status-all.ps1
 ```
 
 如果已有旧服务运行，可以先停止再启动：
 
 ```powershell
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-all.ps1
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-all.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\stop-all.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\start-all.ps1
 ```
 
 ### 后端连接不上数据库
@@ -282,7 +279,7 @@ PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-all.p
 确认中间件已启动：
 
 ```powershell
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\status-deps.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\status-deps.ps1
 ```
 
 再确认 `application-dev.yml` 中 MySQL、Redis、MongoDB、RabbitMQ 的连接信息是否和本机一致。
@@ -303,17 +300,49 @@ http://127.0.0.1:8080/api/v1/ping
 
 ```powershell
 git pull --ff-only
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\stop-all.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\stop-all.ps1
 
 # 重新导入 docs/db 下的最新 SQL 和 Mongo 数据
 # 然后重新构建后端、前端
 
-PowerShell -ExecutionPolicy Bypass -File D:\dev\gj-mall-deps\scripts\start-all.ps1
+PowerShell -ExecutionPolicy Bypass -File scripts\start-all.ps1
 ```
 
 ## 当前验证结果
 
-当前环境已验证：
+当前工作区已用以下命令做过本地验证：
+
+```powershell
+# 一键执行主要验证
+PowerShell -ExecutionPolicy Bypass -File scripts\verify-all.ps1
+```
+
+也可以按模块拆开执行：
+
+```powershell
+# 服务状态
+PowerShell -ExecutionPolicy Bypass -File scripts\status-all.ps1
+
+# 后端目标单测
+cd gj-mall-server
+mvn -pl gj-mall-pay,gj-mall-order,gj-mall-admin-api -am -Dtest=PayServiceImplTest,AfterSaleServiceImplTest,AdminPaymentCallbackVOTest -DfailIfNoTests=false test
+
+# 后端打包
+mvn -DskipTests package
+
+# 前端工具测试
+cd ..\gj-mall-web
+npm test
+cd ..\gj-mall-admin
+npm test
+cd ..\gj-mall-uni
+npm test
+npm run build:h5
+```
+
+支付与售后主流程已通过本地浏览器联调，覆盖 PC/H5 支付结果页、PC/H5 订单详情售后入口、管理后台支付全额退款确认弹窗。联调截图和一次性验证脚本位于 `.codex-run/`，该目录仅作为本机运行产物，不纳入版本管理。
+
+当前环境状态：
 
 ```text
 Backend              127.0.0.1:8080  OK

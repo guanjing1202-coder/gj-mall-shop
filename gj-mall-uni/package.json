@@ -5,6 +5,7 @@
   "scripts": {
     "dev:h5": "uni",
     "dev:mp-weixin": "uni -p mp-weixin",
+    "test": "node --no-warnings --test src/utils/__tests__/*.test.ts",
     "build:h5": "uni build",
     "build:mp-weixin": "uni build -p mp-weixin"
   },

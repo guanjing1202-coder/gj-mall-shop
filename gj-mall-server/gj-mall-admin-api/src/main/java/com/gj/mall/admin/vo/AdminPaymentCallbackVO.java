@@ -1,5 +1,7 @@
 package com.gj.mall.admin.vo;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.gj.mall.order.entity.PayCallbackRecord;
 import com.gj.mall.order.enums.PayChannel;
 import lombok.Data;
@@ -27,6 +29,13 @@ public class AdminPaymentCallbackVO {
     private String errorMessage;
     private String rawData;
     private String requestHeaders;
+    private String channelAppId;
+    private String channelOrderNo;
+    private String channelTradeNo;
+    private String channelNotifyId;
+    private String channelTradeStatus;
+    private String channelAmount;
+    private String validationSummary;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 
@@ -51,6 +60,14 @@ public class AdminPaymentCallbackVO {
         vo.setErrorMessage(record.getErrorMessage());
         vo.setRawData(record.getRawData());
         vo.setRequestHeaders(record.getRequestHeaders());
+        JSONObject rawPayload = parseRawPayload(record.getRawData());
+        vo.setChannelAppId(firstText(rawPayload, "app_id", "appid", "appId", "mchid"));
+        vo.setChannelOrderNo(firstText(rawPayload, "out_trade_no", "outTradeNo", "payNo"));
+        vo.setChannelTradeNo(firstText(rawPayload, "trade_no", "transaction_id", "thirdPayNo", "transactionId"));
+        vo.setChannelNotifyId(firstText(rawPayload, "notify_id", "notifyId", "eventId", "id"));
+        vo.setChannelTradeStatus(firstText(rawPayload, "trade_status", "tradeState", "eventType", "event_type"));
+        vo.setChannelAmount(firstText(rawPayload, "total_amount", "amount", "totalAmount", "payer_total"));
+        vo.setValidationSummary(validationSummary(vo));
         vo.setCreateTime(record.getCreateTime());
         vo.setUpdateTime(record.getUpdateTime());
         return vo;
@@ -69,5 +86,37 @@ public class AdminPaymentCallbackVO {
         if (Integer.valueOf(2).equals(status)) return "已忽略";
         if (Integer.valueOf(3).equals(status)) return "处理失败";
         return "未知";
+    }
+
+    private static JSONObject parseRawPayload(String rawData) {
+        if (rawData == null || rawData.trim().isEmpty()) {
+            return new JSONObject();
+        }
+        try {
+            return JSON.parseObject(rawData);
+        } catch (Exception ignored) {
+            return new JSONObject();
+        }
+    }
+
+    private static String firstText(JSONObject payload, String... keys) {
+        for (String key : keys) {
+            String value = payload.getString(key);
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private static String validationSummary(AdminPaymentCallbackVO vo) {
+        StringBuilder builder = new StringBuilder();
+        builder.append(vo.getSignatureStatusDesc());
+        builder.append(" / ");
+        builder.append(vo.getProcessStatusDesc());
+        if (vo.getErrorMessage() != null && !vo.getErrorMessage().trim().isEmpty()) {
+            builder.append(" / 原因：").append(vo.getErrorMessage().trim());
+        }
+        return builder.toString();
     }
 }

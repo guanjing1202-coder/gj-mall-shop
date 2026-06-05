@@ -73,7 +73,16 @@ export interface AfterSaleRecord {
   currentOrderStatus?: number
   currentOrderStatusDesc?: string
   refundRecord?: RefundRecord
+  timeline?: AfterSaleTimelineItem[]
   items?: AfterSaleItem[]
+}
+
+export interface AfterSaleTimelineItem {
+  title?: string
+  description?: string
+  time?: string
+  active?: boolean
+  tone?: string
 }
 
 export interface RefundRecord {

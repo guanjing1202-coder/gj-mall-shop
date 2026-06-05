@@ -207,7 +207,10 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         update.setAuditTime(LocalDateTime.now());
         afterSaleMapper.updateById(update);
         restoreOrderStatus(afterSale);
-        notifyUser(afterSale.getUserId(), "after_sale", "售后审核未通过", "售后单 " + afterSale.getAfterSaleNo() + " 未通过审核，可查看原因或联系商家。", "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
+        String rejectReason = dto == null ? null : StrUtil.trim(dto.getRejectReason());
+        notifyUser(afterSale.getUserId(), "after_sale", "售后审核未通过",
+                "售后单 " + afterSale.getAfterSaleNo() + " 未通过审核，原因：" + StrUtil.blankToDefault(rejectReason, "可查看原因或联系商家") + "。",
+                "after_sale", afterSale.getId(), afterSale.getAfterSaleNo());
     }
 
     @Override

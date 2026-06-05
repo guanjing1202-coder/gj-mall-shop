@@ -80,6 +80,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '我的售后' },
   },
   {
+    path: '/after-sales/:id',
+    name: 'AfterSaleDetail',
+    component: () => import('@/views/AfterSaleDetailView.vue'),
+    meta: { title: '售后详情' },
+  },
+  {
     path: '/addresses',
     name: 'AddressList',
     component: () => import('@/views/AddressListView.vue'),

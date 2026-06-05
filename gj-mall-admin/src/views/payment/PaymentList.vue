@@ -26,14 +26,18 @@ import {
 import {
   canReplayPaymentCallback,
   formatCallbackSignatureSample,
+  formatPaymentCallbackInspectItems,
   paymentCallbackProcessLabel,
   paymentCallbackReplayReason,
 } from '@/utils/payment-callback-ui'
 import {
   canRefundPayment,
+  canMarkRefundFailed as canMarkRefundFailedAction,
+  canRetryRefund as canRetryRefundAction,
   canSyncPaymentStatus,
   isFullRefundAmount,
   paymentRefundHint,
+  refundFailureHint,
   paymentSyncStatusHint,
 } from '@/utils/payment-action-ui'
 import {
@@ -65,6 +69,12 @@ const refundSaving = ref(false)
 const refundTarget = ref<PaymentRecord>()
 const refundForm = reactive({
   amount: undefined as number | undefined,
+  reason: '',
+})
+const refundFailedOpen = ref(false)
+const refundFailedSaving = ref(false)
+const refundFailedTarget = ref<PaymentRecord>()
+const refundFailedForm = reactive({
   reason: '',
 })
 
@@ -418,22 +428,29 @@ function handleMarkRefundFailed(record: PaymentRecord) {
   if (!refundRecord) {
     return
   }
-  Modal.confirm({
-    title: '确认标记退款失败吗？',
-    content: `退款流水：${refundRecord.refundNo}`,
-    okButtonProps: { danger: true },
-    async onOk() {
-      actionId.value = record.id
-      try {
-        await markRefundFailed(refundRecord.id, '后台手动标记退款失败')
-        message.success('已标记退款失败')
-        await fetchPayments()
-        await refreshCurrentPayment(record.id)
-      } finally {
-        actionId.value = undefined
-      }
-    },
-  })
+  refundFailedTarget.value = record
+  refundFailedForm.reason = refundRecord.reason || ''
+  refundFailedOpen.value = true
+}
+
+async function submitMarkRefundFailed() {
+  const target = refundFailedTarget.value
+  const refundRecord = target?.refundRecord
+  if (!target || !refundRecord) {
+    return
+  }
+  refundFailedSaving.value = true
+  actionId.value = target.id
+  try {
+    await markRefundFailed(refundRecord.id, refundFailedForm.reason.trim() || undefined)
+    message.success('已标记退款失败')
+    refundFailedOpen.value = false
+    await fetchPayments()
+    await refreshCurrentPayment(target.id)
+  } finally {
+    refundFailedSaving.value = false
+    actionId.value = undefined
+  }
 }
 
 function handleReplayCallback(item: PaymentCallbackRecord) {
@@ -550,15 +567,19 @@ function refundHint(record?: PaymentRecord) {
 }
 
 function canRetryRefund(record: PaymentRecord) {
-  return record.refundRecord?.status === 0 || record.refundRecord?.status === 2
+  return canRetryRefundAction(record)
 }
 
 function canMarkRefundFailed(record: PaymentRecord) {
-  return record.refundRecord?.status === 0
+  return canMarkRefundFailedAction(record)
 }
 
 function canReplayCallback(item: PaymentCallbackRecord) {
   return canReplayPaymentCallback(item)
+}
+
+function callbackInspectItems(item: PaymentCallbackRecord) {
+  return formatPaymentCallbackInspectItems(item)
 }
 
 function refundStatusColor(status?: number) {
@@ -569,6 +590,10 @@ function refundStatusColor(status?: number) {
     return 'error'
   }
   return 'processing'
+}
+
+function refundErrorHint(record?: PaymentRecord) {
+  return refundFailureHint(record?.refundRecord)
 }
 
 function refundOperatorText(value?: string) {
@@ -930,6 +955,19 @@ function goPaymentConfig(tip?: PaymentAccessTipItem) {
               <span>{{ refundHint(currentPayment) || '--' }}</span>
             </a-space>
           </a-descriptions-item>
+          <a-descriptions-item label="最近用户通知" :span="2">
+            <div
+              v-if="currentPayment.latestUserMessageTitle || currentPayment.latestUserMessageContent"
+              class="latest-user-message"
+            >
+              <div class="latest-user-message__head">
+                <strong>{{ currentPayment.latestUserMessageTitle || '用户通知' }}</strong>
+                <small>{{ currentPayment.latestUserMessageTime || '--' }}</small>
+              </div>
+              <p>{{ currentPayment.latestUserMessageContent || '--' }}</p>
+            </div>
+            <span v-else>--</span>
+          </a-descriptions-item>
         </a-descriptions>
 
         <div style="margin-top: 20px">
@@ -962,6 +1000,7 @@ function goPaymentConfig(tip?: PaymentAccessTipItem) {
             <div class="refund-record-card__meta">
               <span v-if="currentPayment.refundRecord.afterSaleNo">售后单：{{ currentPayment.refundRecord.afterSaleNo }}</span>
               <span>退款原因：{{ currentPayment.refundRecord.reason || '--' }}</span>
+              <span v-if="refundErrorHint(currentPayment)" class="refund-record-card__error">{{ refundErrorHint(currentPayment) }}</span>
               <span v-if="currentPayment.refundRecord.callbackData">处理记录：{{ currentPayment.refundRecord.callbackData }}</span>
               <a-space v-if="canRetryRefund(currentPayment) || canMarkRefundFailed(currentPayment)" wrap>
                 <a-button
@@ -1002,6 +1041,12 @@ function goPaymentConfig(tip?: PaymentAccessTipItem) {
                   <p>
                     {{ item.channelDesc || '--' }} / {{ item.eventType || '支付通知' }} / {{ formatMoney(item.amount) }}
                   </p>
+                  <dl v-if="callbackInspectItems(item).length" class="callback-inspect">
+                    <div v-for="field in callbackInspectItems(item)" :key="field.label">
+                      <dt>{{ field.label }}</dt>
+                      <dd>{{ field.value }}</dd>
+                    </div>
+                  </dl>
                   <a-space wrap>
                     <a-tag :color="signatureStatusColor(item.signatureStatus)">
                       {{ item.signatureStatusDesc || '--' }}
@@ -1083,6 +1128,28 @@ function goPaymentConfig(tip?: PaymentAccessTipItem) {
       </a-form-item>
       <a-form-item label="退款原因">
         <a-textarea v-model:value="refundForm.reason" :rows="4" placeholder="请输入退款原因" />
+      </a-form-item>
+    </a-form>
+  </a-modal>
+
+  <a-modal
+    v-model:open="refundFailedOpen"
+    title="标记退款失败"
+    :confirm-loading="refundFailedSaving"
+    ok-text="确认失败"
+    ok-type="danger"
+    @ok="submitMarkRefundFailed"
+  >
+    <a-form layout="vertical">
+      <a-form-item label="退款流水">
+        <a-input :value="refundFailedTarget?.refundRecord?.refundNo" disabled />
+      </a-form-item>
+      <a-form-item label="失败原因">
+        <a-textarea
+          v-model:value="refundFailedForm.reason"
+          :rows="4"
+          placeholder="请输入渠道返回原因、人工判定原因等"
+        />
       </a-form-item>
     </a-form>
   </a-modal>
@@ -1283,6 +1350,35 @@ function goPaymentConfig(tip?: PaymentAccessTipItem) {
   color: #475569;
 }
 
+.callback-inspect {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 10px 0 12px;
+  padding: 12px;
+  border: 1px solid #edf2f7;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.callback-inspect div {
+  min-width: 0;
+}
+
+.callback-inspect dt {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.callback-inspect dd {
+  margin: 3px 0 0;
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+
 .sync-status-hint {
   margin-top: 4px;
   color: #64748b;
@@ -1305,6 +1401,40 @@ function goPaymentConfig(tip?: PaymentAccessTipItem) {
   color: #64748b;
 }
 
+.latest-user-message {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.latest-user-message__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.latest-user-message__head strong {
+  color: #111827;
+  line-height: 1.45;
+}
+
+.latest-user-message__head small {
+  flex-shrink: 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.latest-user-message p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
 .refund-record-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 150px;
@@ -1322,6 +1452,11 @@ function goPaymentConfig(tip?: PaymentAccessTipItem) {
   display: block;
   color: #64748b;
   font-size: 13px;
+}
+
+.refund-record-card__meta .refund-record-card__error {
+  color: #dc2626;
+  font-weight: 600;
 }
 
 .refund-record-card__main strong {

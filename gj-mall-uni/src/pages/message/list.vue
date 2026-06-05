@@ -74,16 +74,16 @@
           v-for="item in messages"
           :key="item.id"
           class="message-card"
-          :class="{ unread: Number(item.readStatus) === 0 }"
+          :class="[{ unread: Number(item.readStatus) === 0 }, `message-card--${messagePreview(item).tone}`]"
           @tap="openMessage(item)"
         >
           <view class="message-main">
             <view class="message-head">
-              <text>{{ item.typeDesc || '系统通知' }}</text>
+              <text>{{ messagePreview(item).emphasis }}</text>
               <text>{{ Number(item.readStatus) === 0 ? '未读' : '已读' }}</text>
             </view>
-            <text class="message-title">{{ item.title || '消息提醒' }}</text>
-            <text class="message-content">{{ item.content || '-' }}</text>
+            <text class="message-title">{{ messagePreview(item).title }}</text>
+            <text class="message-content">{{ messagePreview(item).content }}</text>
             <text class="message-time">{{ formatTime(item.createTime) }}{{ item.bizNo ? ` · ${item.bizNo}` : '' }}</text>
           </view>
           <view class="message-actions">
@@ -115,6 +115,8 @@ import {
 import { syncSession } from '@/utils/session'
 import {
   emptyMessageSummary,
+  messageNavigationTarget,
+  messagePreview,
   messageTypeFilters,
   normalizeMessageSummary,
   type NormalizedMessageSummary,
@@ -244,10 +246,9 @@ async function openMessage(item: UserMessage) {
     item.readStatus = 1
     await refresh()
   }
-  if (item.bizType === 'order' && item.bizId) {
-    uni.navigateTo({ url: `/pages/order/detail?id=${item.bizId}` })
-  } else if (item.bizType === 'after_sale') {
-    uni.navigateTo({ url: '/pages/after-sales/list' })
+  const target = messageNavigationTarget(item)
+  if (target) {
+    uni.navigateTo({ url: target })
   }
 }
 
@@ -470,6 +471,16 @@ function formatTime(value?: string) {
   background: #fff8f8;
 }
 
+.message-card--danger {
+  border-color: rgba(229, 72, 77, 0.3);
+  background: #fff7f7;
+}
+
+.message-card--info {
+  border-color: rgba(37, 99, 235, 0.2);
+  background: #f8fbff;
+}
+
 .message-head {
   display: flex;
   align-items: center;
@@ -484,6 +495,16 @@ function formatTime(value?: string) {
   color: #2f8f67;
   font-size: 21rpx;
   font-weight: 900;
+}
+
+.message-card--danger .message-head text:first-child {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.message-card--info .message-head text:first-child {
+  background: #dbeafe;
+  color: #2563eb;
 }
 
 .message-head text:last-child {

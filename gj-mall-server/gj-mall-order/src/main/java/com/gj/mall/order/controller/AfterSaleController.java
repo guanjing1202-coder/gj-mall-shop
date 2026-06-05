@@ -50,6 +50,12 @@ public class AfterSaleController {
         return Result.success(afterSaleService.page(UserContext.getUserId(), query));
     }
 
+    @Operation(summary = "售后详情")
+    @GetMapping("/after-sale/{id}")
+    public Result<AfterSaleVO> detail(@PathVariable Long id) {
+        return Result.success(afterSaleService.detail(UserContext.getUserId(), id));
+    }
+
     @Operation(summary = "取消售后申请")
     @PostMapping("/after-sale/{id}/cancel")
     public Result<Void> cancel(@PathVariable Long id) {

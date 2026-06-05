@@ -34,7 +34,7 @@
       <view class="panel">
         <view class="section-head">
           <text>支付方式</text>
-          <text>开发模式</text>
+          <text>实时状态</text>
         </view>
         <view
           v-for="item in channels"
@@ -72,7 +72,7 @@
       </view>
 
       <view class="panel notice">
-        <text>当前项目使用 mock 支付，点击确认后会立即把订单推进到待发货状态；真实微信/支付宝通道已保留接入位置。</text>
+        <text>{{ channelNotice }}</text>
       </view>
     </view>
 
@@ -91,7 +91,7 @@
         <text>合计</text>
         <text>{{ formatPrice(order.payAmount) }}</text>
       </view>
-      <button :disabled="submitting || Number(order.status) !== 0 || payExpired" @tap="submitPay">
+      <button :disabled="payButtonDisabled" @tap="submitPay">
         {{ Number(order.status) === 0 ? '确认支付' : '查看订单' }}
       </button>
     </view>
@@ -101,8 +101,14 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import { createPay, type PayChannel } from '@/api/pay'
+import { createPay, getPayChannels, type PayChannel } from '@/api/pay'
 import { getOrderByNo, getOrderDetail, type OrderDetail, type OrderItem } from '@/api/order'
+import { buildPaymentChannels, firstEnabledPaymentChannel, type PaymentChannelOption } from '@/utils/payment-channel-ui'
+import {
+  paymentRedirectTakesOverCurrentPage,
+  resolvePaymentRedirect,
+  type PaymentRedirectAction,
+} from '@/utils/payment-redirect-ui'
 import { requireSession } from '@/utils/session'
 
 const loading = ref(false)
@@ -110,15 +116,18 @@ const submitting = ref(false)
 const isLoggedIn = ref(false)
 const order = ref<OrderDetail>()
 const selectedChannel = ref<PayChannel>('mock')
+const channels = ref<PaymentChannelOption[]>(buildPaymentChannels())
 const now = ref(Date.now())
 const payError = ref('')
 let timer: ReturnType<typeof setInterval> | undefined
 
-const channels: Array<{ value: PayChannel; label: string; desc: string; icon: string; disabled?: boolean }> = [
-  { value: 'mock', label: '余额模拟支付', desc: '开发环境即时支付成功', icon: '¥' },
-  { value: 'wechat', label: '微信支付', desc: '待接入商户号与证书', icon: '微', disabled: true },
-  { value: 'alipay', label: '支付宝', desc: '待接入 AppID 与密钥', icon: '支', disabled: true },
-]
+const channelNotice = computed(() => {
+  const enabled = channels.value.filter((item) => !item.disabled)
+  if (enabled.length) {
+    return `当前可用支付方式：${enabled.map((item) => item.label).join('、')}。`
+  }
+  return '当前没有可用支付方式，请稍后再试或联系商家。'
+})
 
 const expireAt = computed(() => {
   if (!order.value?.createTime) return 0
@@ -130,6 +139,16 @@ const payExpired = computed(() => {
   if (Number(order.value?.status) !== 0 || !expireAt.value) return false
   return now.value >= expireAt.value
 })
+
+const selectedChannelOption = computed(() => channels.value.find((item) => item.value === selectedChannel.value))
+
+const payButtonDisabled = computed(() =>
+  submitting.value
+    || Number(order.value?.status) !== 0
+    || payExpired.value
+    || !selectedChannelOption.value
+    || selectedChannelOption.value.disabled,
+)
 
 const payCountdown = computed(() => {
   if (!expireAt.value) return '--:--'
@@ -160,7 +179,7 @@ onUnmounted(() => {
 async function loadByNo(orderNo: string) {
   loading.value = true
   try {
-    const res = await getOrderByNo(orderNo)
+    const [res] = await Promise.all([getOrderByNo(orderNo), loadPayChannels()])
     order.value = res.data
     payError.value = ''
   } finally {
@@ -171,7 +190,7 @@ async function loadByNo(orderNo: string) {
 async function loadById(id: string | number) {
   loading.value = true
   try {
-    const res = await getOrderDetail(id)
+    const [res] = await Promise.all([getOrderDetail(id), loadPayChannels()])
     order.value = res.data
     payError.value = ''
   } finally {
@@ -179,10 +198,27 @@ async function loadById(id: string | number) {
   }
 }
 
+async function loadPayChannels() {
+  try {
+    const res = await getPayChannels()
+    updatePayChannels(res.data)
+  } catch {
+    updatePayChannels()
+  }
+}
+
+function updatePayChannels(source?: Parameters<typeof buildPaymentChannels>[0]) {
+  channels.value = buildPaymentChannels(source)
+  const active = channels.value.find((item) => item.value === selectedChannel.value)
+  if (!active || active.disabled) {
+    selectedChannel.value = firstEnabledPaymentChannel(channels.value) || 'mock'
+  }
+}
+
 function selectChannel(channel: PayChannel) {
-  const target = channels.find((item) => item.value === channel)
+  const target = channels.value.find((item) => item.value === channel)
   if (target?.disabled) {
-    uni.showToast({ title: '该支付方式暂未启用', icon: 'none' })
+    uni.showToast({ title: target.desc || '该支付方式暂未启用', icon: 'none' })
     return
   }
   selectedChannel.value = channel
@@ -203,12 +239,24 @@ async function submitPay() {
     uni.showToast({ title: '订单已超时', icon: 'none' })
     return
   }
+  const selected = channels.value.find((item) => item.value === selectedChannel.value)
+  if (!selected || selected.disabled) {
+    payError.value = selected?.desc || '当前支付方式暂不可用'
+    uni.showToast({ title: payError.value, icon: 'none' })
+    return
+  }
   submitting.value = true
   try {
     const res = await createPay({ orderId: order.value.id, channel: selectedChannel.value })
     const status = res.data.paid ? 'success' : 'pending'
+    const redirectAction = resolvePaymentRedirect(res.data)
+    const bridge = res.data.paid ? '' : redirectBridgeLabel(redirectAction)
+    handlePaymentRedirect(redirectAction)
+    if (!res.data.paid && paymentRedirectTakesOverCurrentPage(redirectAction)) {
+      return
+    }
     uni.redirectTo({
-      url: `/pages/pay/result?status=${status}&orderId=${order.value.id}&orderNo=${encodeURIComponent(order.value.orderNo)}&payNo=${encodeURIComponent(res.data.payNo || '')}`,
+      url: `/pages/pay/result?status=${status}&orderId=${order.value.id}&orderNo=${encodeURIComponent(order.value.orderNo)}&payNo=${encodeURIComponent(res.data.payNo || '')}&channel=${encodeURIComponent(res.data.channel || selectedChannel.value)}&bridge=${encodeURIComponent(bridge)}`,
     })
   } catch (error: any) {
     const message = error?.message || '支付失败，请稍后再试'
@@ -219,6 +267,44 @@ async function submitPay() {
   } finally {
     submitting.value = false
   }
+}
+
+function handlePaymentRedirect(action: PaymentRedirectAction) {
+  if (action.kind === 'none') {
+    return
+  }
+  if (action.kind === 'url') {
+    // #ifdef H5
+    window.location.href = action.target
+    // #endif
+    // #ifndef H5
+    uni.showToast({ title: '请在真实支付环境中打开渠道收银台', icon: 'none' })
+    // #endif
+    return
+  }
+  if (action.kind === 'html-form') {
+    // #ifdef H5
+    const host = document.createElement('div')
+    host.style.display = 'none'
+    host.innerHTML = action.html
+    document.body.appendChild(host)
+    const form = host.querySelector('form') as HTMLFormElement | null
+    form?.submit()
+    setTimeout(() => host.remove(), 1000)
+    // #endif
+    // #ifndef H5
+    uni.showToast({ title: '该渠道需要 H5 收银页面完成支付', icon: 'none' })
+    // #endif
+    return
+  }
+  uni.showToast({ title: action.text, icon: 'none' })
+}
+
+function redirectBridgeLabel(action: PaymentRedirectAction) {
+  if (action.kind === 'url') return 'external'
+  if (action.kind === 'html-form') return 'form'
+  if (action.kind === 'info') return 'info'
+  return ''
 }
 
 function startTimer() {

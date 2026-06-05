@@ -82,6 +82,13 @@
       }
     },
     {
+      "path": "pages/after-sales/detail",
+      "style": {
+        "navigationBarTitleText": "售后详情",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/address/list",
       "style": {
         "navigationBarTitleText": "收货地址",

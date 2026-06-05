@@ -40,7 +40,7 @@
       </view>
 
       <view v-else class="list">
-        <view v-for="item in afterSales" :key="item.id" class="sale-card" @tap="goOrder(item)">
+        <view v-for="item in afterSales" :key="item.id" class="sale-card" @tap="goDetail(item)">
           <view class="card-head">
             <view>
               <text>{{ item.afterSaleNo }}</text>
@@ -87,6 +87,18 @@
             <view v-if="item.returnCompany || item.returnNo">
               <text>退货物流</text>
               <text>{{ item.returnCompany || '-' }} {{ item.returnNo || '' }}</text>
+            </view>
+            <view v-if="refundRecordTitle(item.refundRecord)">
+              <text>退款记录</text>
+              <text>{{ refundRecordTitle(item.refundRecord) }}</text>
+            </view>
+            <view v-if="refundRecordMeta(item.refundRecord)">
+              <text>退款摘要</text>
+              <text>{{ refundRecordMeta(item.refundRecord) }}</text>
+            </view>
+            <view v-if="refundRecordNotice(item.refundRecord)">
+              <text>退款进度</text>
+              <text>{{ refundRecordNotice(item.refundRecord) }}</text>
             </view>
           </view>
 
@@ -169,6 +181,9 @@ import { syncSession } from '@/utils/session'
 import {
   canCancelAfterSale,
   canSubmitReturnLogistics,
+  refundRecordMeta,
+  refundRecordNotice,
+  refundRecordTitle,
   statusBadgeClass,
 } from '@/utils/after-sale-ui'
 
@@ -256,6 +271,10 @@ async function selectStatus(status?: number) {
 
 function goOrder(item: AfterSale) {
   uni.navigateTo({ url: `/pages/order/detail?id=${item.orderId}` })
+}
+
+function goDetail(item: AfterSale) {
+  uni.navigateTo({ url: `/pages/after-sales/detail?id=${item.id}` })
 }
 
 function goOrders() {

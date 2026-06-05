@@ -44,6 +44,9 @@ public class AdminPaymentVO {
     private LocalDateTime syncCallbackTime;
     private Boolean refundAllowed;
     private String refundReason;
+    private String latestUserMessageTitle;
+    private String latestUserMessageContent;
+    private LocalDateTime latestUserMessageTime;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 

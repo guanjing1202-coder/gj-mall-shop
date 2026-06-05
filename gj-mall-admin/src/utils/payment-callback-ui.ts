@@ -9,6 +9,22 @@ export interface PaymentCallbackSignatureSample {
   signature?: string
 }
 
+export interface PaymentCallbackInspectState {
+  channelDesc?: string
+  channelAppId?: string
+  channelOrderNo?: string
+  channelTradeNo?: string
+  channelNotifyId?: string
+  channelTradeStatus?: string
+  channelAmount?: string
+  validationSummary?: string
+}
+
+export interface PaymentCallbackInspectItem {
+  label: string
+  value: string
+}
+
 export function canReplayPaymentCallback(callback?: PaymentCallbackReplayState) {
   return callback?.processStatus === 3 && callback.signatureStatus !== 2
 }
@@ -54,4 +70,27 @@ export function paymentCallbackProcessLabel(status?: number, fallback?: string) 
     return '处理失败'
   }
   return fallback || '--'
+}
+
+export function formatPaymentCallbackInspectItems(callback?: PaymentCallbackInspectState) {
+  if (!callback) {
+    return []
+  }
+  const items: Array<{ label: string; value?: string }> = [
+    { label: '渠道', value: callback.channelDesc },
+    { label: 'AppID', value: callback.channelAppId },
+    { label: '商户单号', value: callback.channelOrderNo },
+    { label: '渠道交易号', value: callback.channelTradeNo },
+    { label: '通知ID', value: callback.channelNotifyId },
+    { label: '交易状态', value: callback.channelTradeStatus },
+    { label: '通知金额', value: callback.channelAmount },
+    { label: '校验摘要', value: callback.validationSummary },
+  ]
+  return items.reduce<PaymentCallbackInspectItem[]>((result, item) => {
+    const value = item.value?.trim()
+    if (value) {
+      result.push({ label: item.label, value })
+    }
+    return result
+  }, [])
 }

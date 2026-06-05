@@ -55,6 +55,9 @@ export interface PaymentRecord {
   syncCallbackTime?: string
   refundAllowed?: boolean
   refundReason?: string
+  latestUserMessageTitle?: string
+  latestUserMessageContent?: string
+  latestUserMessageTime?: string
   createTime?: string
   updateTime?: string
 }
@@ -159,6 +162,13 @@ export interface PaymentCallbackRecord {
   errorMessage?: string
   rawData?: string
   requestHeaders?: string
+  channelAppId?: string
+  channelOrderNo?: string
+  channelTradeNo?: string
+  channelNotifyId?: string
+  channelTradeStatus?: string
+  channelAmount?: string
+  validationSummary?: string
   createTime?: string
   updateTime?: string
 }

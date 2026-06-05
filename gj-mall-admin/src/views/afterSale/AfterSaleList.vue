@@ -800,6 +800,21 @@ function createEmptySummary(): AfterSaleSummary {
           <a-descriptions-item label="问题描述" :span="2">{{ currentAfterSale.description || '--' }}</a-descriptions-item>
         </a-descriptions>
 
+        <div v-if="currentAfterSale.timeline?.length" style="margin-top: 20px">
+          <h4 style="margin-bottom: 12px">处理时间线</h4>
+          <a-timeline>
+            <a-timeline-item
+              v-for="item in currentAfterSale.timeline"
+              :key="`${item.title}-${item.time || ''}`"
+              :color="item.tone === 'danger' ? 'red' : item.tone === 'warning' ? 'orange' : item.active ? 'green' : 'gray'"
+            >
+              <strong>{{ item.title }}</strong>
+              <div style="margin-top: 4px; color: #64748b">{{ item.description || '--' }}</div>
+              <div style="margin-top: 4px; color: #94a3b8; font-size: 12px">{{ item.time || '--' }}</div>
+            </a-timeline-item>
+          </a-timeline>
+        </div>
+
         <div style="margin-top: 20px">
           <h4 style="margin-bottom: 12px">退款记录</h4>
           <div v-if="currentAfterSale.refundRecord" class="refund-record-card">
@@ -905,7 +920,20 @@ function createEmptySummary(): AfterSaleSummary {
         <a-descriptions-item label="金额">{{ formatMoney(actionTarget.amount) }}</a-descriptions-item>
         <a-descriptions-item label="订单">{{ actionTarget.orderNo }}</a-descriptions-item>
         <a-descriptions-item label="会员">{{ userText(actionTarget) }}</a-descriptions-item>
+        <a-descriptions-item v-if="actionMode === 'refund'" label="支付流水">
+          {{ actionTarget.refundRecord?.payNo || actionTarget.orderNo || '--' }}
+        </a-descriptions-item>
+        <a-descriptions-item v-if="actionMode === 'refund'" label="已有退款">
+          {{ actionTarget.refundRecord?.refundNo || '无' }}
+        </a-descriptions-item>
       </a-descriptions>
+      <a-alert
+        v-if="actionMode === 'refund'"
+        type="warning"
+        show-icon
+        style="margin-bottom: 16px"
+        :message="`确认后将按 ${formatMoney(actionTarget?.amount)} 为订单 ${actionTarget?.orderNo || '--'} 发起全额退款。`"
+      />
       <a-form-item v-if="actionMode === 'reject'" label="拒绝原因">
         <a-textarea v-model:value="actionForm.rejectReason" :rows="3" placeholder="请输入拒绝原因" />
       </a-form-item>

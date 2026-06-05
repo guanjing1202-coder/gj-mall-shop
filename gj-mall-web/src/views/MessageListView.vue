@@ -15,6 +15,8 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import {
   emptyMessageSummary,
+  messageNavigationTarget,
+  messagePreview,
   messageTypeFilters,
   normalizeMessageSummary,
   type NormalizedMessageSummary,
@@ -128,11 +130,8 @@ async function removeMessage(item: UserMessage) {
 }
 
 function openBiz(item: UserMessage) {
-  if (item.bizType === 'order' && item.bizId) {
-    router.push(`/order/${item.bizId}`)
-  } else if (item.bizType === 'after_sale') {
-    router.push('/after-sales')
-  }
+  const target = messageNavigationTarget(item)
+  if (target) router.push(target)
 }
 
 function switchFilter(value?: number) {
@@ -219,12 +218,12 @@ function currentFilterText() {
             v-for="item in messages"
             :key="item.id"
             class="message-card"
-            :class="{ unread: Number(item.readStatus) === 0 }"
+            :class="[{ unread: Number(item.readStatus) === 0 }, `message-card--${messagePreview(item).tone}`]"
           >
             <button type="button" class="message-main" @click="readMessage(item)">
-              <span>{{ item.typeDesc || '系统通知' }}</span>
-              <strong>{{ item.title || '消息提醒' }}</strong>
-              <p>{{ item.content || '-' }}</p>
+              <span>{{ messagePreview(item).emphasis }}</span>
+              <strong>{{ messagePreview(item).title }}</strong>
+              <p>{{ messagePreview(item).content }}</p>
               <em>{{ formatTime(item.createTime) }} <template v-if="item.bizNo">· {{ item.bizNo }}</template></em>
             </button>
             <div class="message-actions">
@@ -446,6 +445,16 @@ function currentFilterText() {
   background: #fff8f8;
 }
 
+.message-card--danger {
+  border-color: rgba(229, 72, 77, 0.28);
+  background: #fff7f7;
+}
+
+.message-card--info {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: #f8fbff;
+}
+
 .message-main {
   min-width: 0;
   border: 0;
@@ -461,6 +470,16 @@ function currentFilterText() {
   color: #6b7280;
   font-size: 12px;
   font-style: normal;
+}
+
+.message-card--danger .message-main span:first-child {
+  color: #dc2626;
+  font-weight: 900;
+}
+
+.message-card--info .message-main span:first-child {
+  color: #2563eb;
+  font-weight: 900;
 }
 
 .message-main strong {

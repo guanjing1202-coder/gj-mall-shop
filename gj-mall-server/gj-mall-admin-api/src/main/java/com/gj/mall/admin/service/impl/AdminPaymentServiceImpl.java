@@ -31,6 +31,8 @@ import com.gj.mall.pay.config.PayRuntimeConfigService;
 import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.user.entity.UmsUser;
+import com.gj.mall.user.entity.UmsUserMessage;
+import com.gj.mall.user.mapper.UmsUserMessageMapper;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import com.gj.mall.user.service.UserMessageService;
 import lombok.RequiredArgsConstructor;
@@ -61,6 +63,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
     private final PayRefundRecordMapper refundRecordMapper;
     private final OmsOrderMapper orderMapper;
     private final UmsUserMapper userMapper;
+    private final UmsUserMessageMapper userMessageMapper;
     private final OrderService orderService;
     private final PayService payService;
     private final PayCallbackSignatureSupport signatureSupport;
@@ -336,6 +339,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         orderUpdate.setId(order.getId());
         orderUpdate.setStatus(OrderStatus.REFUNDED.getCode());
         orderMapper.updateById(orderUpdate);
+        notifyRefundSuccess(payment.getUserId(), payment.getOrderId(), payment.getOrderNo(), refundRecord.getAmount());
     }
 
     @Override
@@ -351,6 +355,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         refundUpdate.setCallbackData(appendCallback(refundRecord.getCallbackData(),
                 "admin-mark-refund-failed reason=" + StrUtil.blankToDefault(StrUtil.trim(reason), "-")));
         refundRecordMapper.updateById(refundUpdate);
+        notifyRefundFailed(refundRecord, reason);
     }
 
     @Override
@@ -509,15 +514,26 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
                         .collect(Collectors.toMap(UmsUser::getId, item -> item, (a, b) -> a));
         Map<Long, PayRefundRecord> refundMap = refundRecordMap(records);
         Map<Long, PayCallbackRecord> syncCallbackMap = syncCallbackMap(records);
+        Map<Long, UmsUserMessage> userMessageMap = latestUserMessageMap(records);
 
         return records.stream()
                 .map(item -> {
                     AdminPaymentVO vo = AdminPaymentVO.from(item, orderMap.get(item.getOrderId()), userMap.get(item.getUserId()), refundMap.get(item.getId()));
                     fillSyncStatus(vo, item, syncCallbackMap.get(item.getId()));
                     fillRefundStatus(vo, item, orderMap.get(item.getOrderId()), refundMap.get(item.getId()));
+                    fillLatestUserMessage(vo, userMessageMap.get(item.getOrderId()));
                     return vo;
                 })
                 .collect(Collectors.toList());
+    }
+
+    private void fillLatestUserMessage(AdminPaymentVO vo, UmsUserMessage message) {
+        if (message == null) {
+            return;
+        }
+        vo.setLatestUserMessageTitle(message.getTitle());
+        vo.setLatestUserMessageContent(message.getContent());
+        vo.setLatestUserMessageTime(message.getCreateTime());
     }
 
     private void fillRefundStatus(AdminPaymentVO vo, PayPaymentRecord record, OmsOrder order, PayRefundRecord refundRecord) {
@@ -609,6 +625,26 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         return result;
     }
 
+    private Map<Long, UmsUserMessage> latestUserMessageMap(List<PayPaymentRecord> records) {
+        List<Long> orderIds = records.stream()
+                .map(PayPaymentRecord::getOrderId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(orderIds)) {
+            return Collections.emptyMap();
+        }
+        List<UmsUserMessage> messages = userMessageMapper.selectList(Wrappers.<UmsUserMessage>lambdaQuery()
+                .eq(UmsUserMessage::getBizType, "order")
+                .in(UmsUserMessage::getBizId, orderIds)
+                .orderByDesc(UmsUserMessage::getCreateTime));
+        if (CollUtil.isEmpty(messages)) {
+            return Collections.emptyMap();
+        }
+        return messages.stream()
+                .collect(Collectors.toMap(UmsUserMessage::getBizId, item -> item, (a, b) -> a));
+    }
+
     private Map<Long, PayRefundRecord> refundRecordMap(List<PayPaymentRecord> records) {
         List<Long> paymentIds = records.stream()
                 .map(PayPaymentRecord::getId)
@@ -643,6 +679,19 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
             messageService.create(userId, "payment", "退款已完成",
                     "订单 " + orderNo + " 已完成退款，退款金额 ¥" + refundAmount + "。",
                     "order", orderId, orderNo);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void notifyRefundFailed(PayRefundRecord refundRecord, String reason) {
+        try {
+            String failureReason = StrUtil.blankToDefault(StrUtil.trim(reason), "请等待商家重新处理");
+            String bizType = refundRecord.getAfterSaleId() == null ? "order" : "after_sale";
+            Long bizId = refundRecord.getAfterSaleId() == null ? refundRecord.getOrderId() : refundRecord.getAfterSaleId();
+            String bizNo = StrUtil.blankToDefault(refundRecord.getAfterSaleNo(), refundRecord.getOrderNo());
+            messageService.create(refundRecord.getUserId(), "after_sale", "退款失败",
+                    "订单 " + refundRecord.getOrderNo() + " 的退款处理失败，原因：" + failureReason + "，请等待商家重新处理。",
+                    bizType, bizId, bizNo);
         } catch (Exception ignored) {
         }
     }

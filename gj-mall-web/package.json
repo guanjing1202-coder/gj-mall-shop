@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "node --test src/utils/__tests__/*.test.ts",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --port 4173"
   },

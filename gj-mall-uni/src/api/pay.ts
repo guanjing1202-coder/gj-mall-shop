@@ -17,6 +17,39 @@ export interface PayResult {
   payInfo?: string
 }
 
+export interface PayStatus {
+  payNo: string
+  thirdPayNo?: string
+  channel?: number
+  channelName?: PayChannel | string
+  channelDesc?: string
+  paid?: boolean
+  status?: number
+  statusDesc?: string
+  amount?: number
+  payTime?: string
+  orderId?: ApiId
+  orderNo?: string
+  orderStatus?: number
+  orderStatusDesc?: string
+}
+
+export interface PayChannelStatus {
+  channel?: number
+  name: PayChannel
+  desc?: string
+  enabled?: boolean
+  status?: string
+}
+
 export function createPay(data: PayPayload) {
   return request<PayResult>({ url: '/api/pay', method: 'POST', data })
+}
+
+export function getPayChannels() {
+  return request<PayChannelStatus[]>({ url: '/api/pay/channels', method: 'GET' })
+}
+
+export function getPayStatus(payNo: string) {
+  return request<PayStatus>({ url: `/api/pay/${encodeURIComponent(payNo)}/status`, method: 'GET' })
 }

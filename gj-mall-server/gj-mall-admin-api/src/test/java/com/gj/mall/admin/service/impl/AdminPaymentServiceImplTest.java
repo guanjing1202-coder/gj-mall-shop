@@ -1,6 +1,7 @@
 package com.gj.mall.admin.service.impl;
 
 import com.gj.mall.common.exception.BizException;
+import com.gj.mall.common.enums.ResultCode;
 import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.entity.PayCallbackRecord;
 import com.gj.mall.order.entity.PayPaymentRecord;
@@ -15,6 +16,8 @@ import com.gj.mall.pay.service.PayService;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.admin.vo.AdminPaymentAccessVO;
 import com.gj.mall.admin.vo.AdminPaymentVO;
+import com.gj.mall.user.entity.UmsUserMessage;
+import com.gj.mall.user.mapper.UmsUserMessageMapper;
 import com.gj.mall.user.mapper.UmsUserMapper;
 import com.gj.mall.user.service.UserMessageService;
 import org.junit.jupiter.api.Test;
@@ -38,6 +41,30 @@ import static org.mockito.Mockito.when;
 
 class AdminPaymentServiceImplTest {
 
+    private AdminPaymentServiceImpl createService(
+            PayPaymentRecordMapper recordMapper,
+            PayCallbackRecordMapper callbackRecordMapper,
+            PayRefundRecordMapper refundRecordMapper,
+            OmsOrderMapper orderMapper,
+            UmsUserMapper userMapper,
+            OrderService orderService,
+            PayService payService,
+            PayRuntimeConfigService runtimeConfigService,
+            UserMessageService messageService) {
+        return new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                mock(UmsUserMessageMapper.class),
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                runtimeConfigService,
+                messageService);
+    }
+
     @Test
     void refundSendsPaymentMessageToUser() {
         PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
@@ -48,17 +75,9 @@ class AdminPaymentServiceImplTest {
         OrderService orderService = mock(OrderService.class);
         PayService payService = mock(PayService.class);
         UserMessageService messageService = mock(UserMessageService.class);
-        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
-                recordMapper,
-                callbackRecordMapper,
-                refundRecordMapper,
-                orderMapper,
-                userMapper,
-                orderService,
-                payService,
-                new PayCallbackSignatureSupport(),
-                defaultRuntimeConfig(),
-                messageService);
+        AdminPaymentServiceImpl service = createService(
+                recordMapper, callbackRecordMapper, refundRecordMapper, orderMapper, userMapper,
+                orderService, payService, defaultRuntimeConfig(), messageService);
 
         PayPaymentRecord payment = paidPayment();
         OmsOrder order = paidOrder();
@@ -87,17 +106,10 @@ class AdminPaymentServiceImplTest {
         UmsUserMapper userMapper = mock(UmsUserMapper.class);
         OrderService orderService = mock(OrderService.class);
         PayService payService = mock(PayService.class);
-        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
-                recordMapper,
-                callbackRecordMapper,
-                refundRecordMapper,
-                orderMapper,
-                userMapper,
-                orderService,
-                payService,
-                new PayCallbackSignatureSupport(),
-                defaultRuntimeConfig(),
-                mock(UserMessageService.class));
+        UserMessageService messageService = mock(UserMessageService.class);
+        AdminPaymentServiceImpl service = createService(
+                recordMapper, callbackRecordMapper, refundRecordMapper, orderMapper, userMapper,
+                orderService, payService, defaultRuntimeConfig(), messageService);
 
         PayRefundRecord refund = failedRefund();
         PayPaymentRecord payment = paidPayment();
@@ -119,6 +131,14 @@ class AdminPaymentServiceImplTest {
                         && update.getCallbackData().contains("admin-retry-refund")));
         verify(orderMapper).updateById(argThat(update ->
                 order.getId().equals(update.getId()) && Integer.valueOf(6).equals(update.getStatus())));
+        verify(messageService).create(
+                payment.getUserId(),
+                "payment",
+                "退款已完成",
+                "订单 " + payment.getOrderNo() + " 已完成退款，退款金额 ¥99.00。",
+                "order",
+                payment.getOrderId(),
+                payment.getOrderNo());
     }
 
     @Test
@@ -136,6 +156,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -163,17 +184,10 @@ class AdminPaymentServiceImplTest {
         UmsUserMapper userMapper = mock(UmsUserMapper.class);
         OrderService orderService = mock(OrderService.class);
         PayService payService = mock(PayService.class);
-        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
-                recordMapper,
-                callbackRecordMapper,
-                refundRecordMapper,
-                orderMapper,
-                userMapper,
-                orderService,
-                payService,
-                new PayCallbackSignatureSupport(),
-                defaultRuntimeConfig(),
-                mock(UserMessageService.class));
+        UserMessageService messageService = mock(UserMessageService.class);
+        AdminPaymentServiceImpl service = createService(
+                recordMapper, callbackRecordMapper, refundRecordMapper, orderMapper, userMapper,
+                orderService, payService, defaultRuntimeConfig(), messageService);
 
         PayRefundRecord refund = failedRefund();
         refund.setStatus(0);
@@ -187,6 +201,99 @@ class AdminPaymentServiceImplTest {
                         && Integer.valueOf(2).equals(update.getStatus())
                         && update.getCallbackData().contains("admin-mark-refund-failed")
                         && update.getCallbackData().contains("渠道返回失败")));
+        verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
+        verify(orderMapper, never()).updateById(any(OmsOrder.class));
+        verify(messageService).create(
+                refund.getUserId(),
+                "after_sale",
+                "退款失败",
+                "订单 " + refund.getOrderNo() + " 的退款处理失败，原因：渠道返回失败，请等待商家重新处理。",
+                "order",
+                refund.getOrderId(),
+                refund.getOrderNo());
+    }
+
+    @Test
+    void markRefundFailedFallsBackWhenReasonIsBlank() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = createService(
+                recordMapper, callbackRecordMapper, refundRecordMapper, orderMapper, userMapper,
+                orderService, payService, defaultRuntimeConfig(), mock(UserMessageService.class));
+
+        PayRefundRecord refund = failedRefund();
+        refund.setStatus(0);
+        when(refundRecordMapper.selectById(900L)).thenReturn(refund);
+
+        service.markRefundFailed(900L, "   ");
+
+        verify(refundRecordMapper).updateById(argThat(update ->
+                refund.getId().equals(update.getId())
+                        && Integer.valueOf(2).equals(update.getStatus())
+                        && update.getCallbackData().contains("reason=-")));
+    }
+
+    @Test
+    void markRefundFailedRejectsNonProcessingRefundRecord() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = createService(
+                recordMapper, callbackRecordMapper, refundRecordMapper, orderMapper, userMapper,
+                orderService, payService, defaultRuntimeConfig(), mock(UserMessageService.class));
+
+        PayRefundRecord refund = failedRefund();
+        when(refundRecordMapper.selectById(900L)).thenReturn(refund);
+
+        BizException error = assertThrows(BizException.class, () -> service.markRefundFailed(900L, "重复失败"));
+
+        assertTrue(error.getMessage().contains("仅退款中记录可标记失败"));
+        verify(refundRecordMapper, never()).updateById(any(PayRefundRecord.class));
+        verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
+        verify(orderMapper, never()).updateById(any(OmsOrder.class));
+    }
+
+    @Test
+    void retryRefundRejectsMissingOrder() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                mock(UmsUserMessageMapper.class),
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                defaultRuntimeConfig(),
+                mock(UserMessageService.class));
+
+        PayRefundRecord refund = failedRefund();
+        PayPaymentRecord payment = paidPayment();
+        when(refundRecordMapper.selectById(900L)).thenReturn(refund);
+        when(recordMapper.selectById(refund.getPaymentId())).thenReturn(payment);
+        when(orderMapper.selectById(refund.getOrderId())).thenReturn(null);
+
+        BizException error = assertThrows(BizException.class, () -> service.retryRefund(900L));
+
+        assertEquals(ResultCode.ORDER_NOT_FOUND.getCode(), error.getCode());
+        verify(refundRecordMapper, never()).updateById(any(PayRefundRecord.class));
         verify(recordMapper, never()).updateById(any(PayPaymentRecord.class));
         verify(orderMapper, never()).updateById(any(OmsOrder.class));
     }
@@ -206,6 +313,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -232,6 +340,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -261,6 +370,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -294,6 +404,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -325,6 +436,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -355,6 +467,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -385,6 +498,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -415,6 +529,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -445,6 +560,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -475,6 +591,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -503,6 +620,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -541,6 +659,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -573,6 +692,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -612,6 +732,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -646,6 +767,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -682,6 +804,7 @@ class AdminPaymentServiceImplTest {
                 refundRecordMapper,
                 orderMapper,
                 userMapper,
+                mock(UmsUserMessageMapper.class),
                 orderService,
                 payService,
                 new PayCallbackSignatureSupport(),
@@ -702,6 +825,85 @@ class AdminPaymentServiceImplTest {
 
         assertFalse(detail.getRefundAllowed());
         assertEquals("退款记录已存在，请在退款记录中处理", detail.getRefundReason());
+    }
+
+    @Test
+    void detailIncludesFailedRefundRecordReason() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                mock(UmsUserMessageMapper.class),
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                defaultRuntimeConfig(),
+                mock(UserMessageService.class));
+
+        PayPaymentRecord payment = paidPayment();
+        OmsOrder order = paidOrder();
+        PayRefundRecord refund = failedRefund();
+        refund.setReason("渠道余额不足");
+        when(recordMapper.selectById(payment.getId())).thenReturn(payment);
+        when(orderMapper.selectList(any())).thenReturn(Collections.singletonList(order));
+        when(userMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(refundRecordMapper.selectList(any())).thenReturn(Collections.singletonList(refund));
+        when(callbackRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        AdminPaymentVO detail = service.detail(payment.getId());
+
+        assertNotNull(detail.getRefundRecord());
+        assertEquals(Integer.valueOf(2), detail.getRefundRecord().getStatus());
+        assertEquals("退款失败", detail.getRefundRecord().getStatusDesc());
+        assertEquals("渠道余额不足", detail.getRefundRecord().getReason());
+    }
+
+    @Test
+    void detailIncludesLatestUserOrderMessage() {
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        UmsUserMessageMapper userMessageMapper = mock(UmsUserMessageMapper.class);
+        OrderService orderService = mock(OrderService.class);
+        PayService payService = mock(PayService.class);
+        AdminPaymentServiceImpl service = new AdminPaymentServiceImpl(
+                recordMapper,
+                callbackRecordMapper,
+                refundRecordMapper,
+                orderMapper,
+                userMapper,
+                userMessageMapper,
+                orderService,
+                payService,
+                new PayCallbackSignatureSupport(),
+                defaultRuntimeConfig(),
+                mock(UserMessageService.class));
+
+        PayPaymentRecord payment = paidPayment();
+        UmsUserMessage message = orderMessage(payment.getOrderId());
+        when(recordMapper.selectById(payment.getId())).thenReturn(payment);
+        when(orderMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(userMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(refundRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(callbackRecordMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(userMessageMapper.selectList(any())).thenReturn(Collections.singletonList(message));
+
+        AdminPaymentVO detail = service.detail(payment.getId());
+
+        assertEquals("退款已完成", detail.getLatestUserMessageTitle());
+        assertEquals("订单退款已经到账", detail.getLatestUserMessageContent());
+        assertEquals(message.getCreateTime(), detail.getLatestUserMessageTime());
     }
 
     private PayRuntimeConfigService defaultRuntimeConfig() {
@@ -816,5 +1018,19 @@ class AdminPaymentServiceImplTest {
         callback.setEventType("SUCCESS");
         callback.setCreateTime(LocalDateTime.now());
         return callback;
+    }
+
+    private UmsUserMessage orderMessage(Long orderId) {
+        UmsUserMessage message = new UmsUserMessage();
+        message.setId(501L);
+        message.setUserId(1L);
+        message.setType("payment");
+        message.setTitle("退款已完成");
+        message.setContent("订单退款已经到账");
+        message.setBizType("order");
+        message.setBizId(orderId);
+        message.setBizNo("202605210001");
+        message.setCreateTime(LocalDateTime.now().minusMinutes(5));
+        return message;
     }
 }

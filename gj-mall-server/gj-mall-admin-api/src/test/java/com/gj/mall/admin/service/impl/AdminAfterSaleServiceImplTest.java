@@ -169,6 +169,99 @@ class AdminAfterSaleServiceImplTest {
         assertEquals("RF202605200001", detail.getRefundRecord().getRefundNo());
         assertEquals("退款成功", detail.getRefundRecord().getStatusDesc());
         assertEquals(afterSale.getAmount(), detail.getRefundRecord().getAmount());
+        assertEquals("提交申请", detail.getTimeline().get(0).getTitle());
+        assertTrue(detail.getTimeline().stream().anyMatch(item -> "退款处理".equals(item.getTitle())));
+    }
+
+    @Test
+    void detailShowsRetrySuccessAfterRefundFailure() {
+        OmsAfterSaleMapper afterSaleMapper = mock(OmsAfterSaleMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        OmsOrderItemMapper orderItemMapper = mock(OmsOrderItemMapper.class);
+        PayPaymentRecordMapper paymentRecordMapper = mock(PayPaymentRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        UserMessageService messageService = mock(UserMessageService.class);
+        AfterSaleRuleService ruleService = mock(AfterSaleRuleService.class);
+        AdminAfterSaleServiceImpl service = new AdminAfterSaleServiceImpl(
+                afterSaleMapper,
+                orderMapper,
+                orderItemMapper,
+                paymentRecordMapper,
+                refundRecordMapper,
+                userMapper,
+                messageService,
+                ruleService);
+
+        OmsAfterSale afterSale = waitRefundAfterSale();
+        afterSale.setStatus(4);
+        afterSale.setRefundPaymentId(900L);
+        afterSale.setRefundTime(LocalDateTime.now());
+        PayRefundRecord refund = new PayRefundRecord();
+        refund.setId(900L);
+        refund.setRefundNo("RF202605200001");
+        refund.setAfterSaleId(afterSale.getId());
+        refund.setAfterSaleNo(afterSale.getAfterSaleNo());
+        refund.setStatus(1);
+        refund.setAmount(afterSale.getAmount());
+        refund.setReason("售后退款");
+        refund.setCreateTime(LocalDateTime.now().minusMinutes(15));
+        refund.setUpdateTime(LocalDateTime.now().minusMinutes(5));
+        refund.setSuccessTime(LocalDateTime.now());
+        refund.setCallbackData("refund failed\nadmin-retry-refund success paymentId=300");
+
+        when(afterSaleMapper.selectById(100L)).thenReturn(afterSale);
+        when(orderMapper.selectList(any(Wrapper.class))).thenReturn(Collections.singletonList(paidOrder()));
+        when(orderItemMapper.selectList(any(Wrapper.class))).thenReturn(Collections.emptyList());
+        when(userMapper.selectList(any(Wrapper.class))).thenReturn(Collections.emptyList());
+        when(refundRecordMapper.selectList(any(Wrapper.class))).thenReturn(Collections.singletonList(refund));
+
+        AdminAfterSaleVO detail = service.detail(100L);
+
+        assertTrue(detail.getTimeline().stream().anyMatch(item ->
+                "退款失败后重试".equals(item.getTitle()) && item.getDescription().contains("重新发起退款")));
+        assertTrue(detail.getTimeline().stream().anyMatch(item ->
+                "退款处理".equals(item.getTitle()) && item.getDescription().contains(refund.getRefundNo())));
+    }
+
+    @Test
+    void rejectSendsMessageWithRejectReason() {
+        OmsAfterSaleMapper afterSaleMapper = mock(OmsAfterSaleMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        OmsOrderItemMapper orderItemMapper = mock(OmsOrderItemMapper.class);
+        PayPaymentRecordMapper paymentRecordMapper = mock(PayPaymentRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        UserMessageService messageService = mock(UserMessageService.class);
+        AfterSaleRuleService ruleService = mock(AfterSaleRuleService.class);
+        AdminAfterSaleServiceImpl service = new AdminAfterSaleServiceImpl(
+                afterSaleMapper,
+                orderMapper,
+                orderItemMapper,
+                paymentRecordMapper,
+                refundRecordMapper,
+                userMapper,
+                messageService,
+                ruleService);
+
+        OmsAfterSale afterSale = waitRefundAfterSale();
+        afterSale.setStatus(0);
+        AdminAfterSaleActionDTO dto = new AdminAfterSaleActionDTO();
+        dto.setRejectReason("超过售后受理范围");
+        dto.setAuditRemark("凭证不足");
+
+        when(afterSaleMapper.selectById(100L)).thenReturn(afterSale);
+
+        service.reject(100L, dto);
+
+        verify(messageService).create(
+                afterSale.getUserId(),
+                "after_sale",
+                "售后审核未通过",
+                "售后单 " + afterSale.getAfterSaleNo() + " 未通过审核，原因：超过售后受理范围。",
+                "after_sale",
+                afterSale.getId(),
+                afterSale.getAfterSaleNo());
     }
 
     private OmsAfterSale waitRefundAfterSale() {

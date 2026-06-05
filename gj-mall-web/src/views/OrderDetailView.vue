@@ -24,9 +24,12 @@ import {
   type OrderItem,
   type OrderLogistics,
 } from '@/api/order'
-import { createPay, type PayChannel } from '@/api/pay'
+import { createPay, getPayChannels, type PayChannel } from '@/api/pay'
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
+import { buildPaymentChannels, firstEnabledPaymentChannel, type PaymentChannelOption } from '@/utils/payment-channel-ui'
+import { resolvePaymentRedirect, type PaymentRedirectAction } from '@/utils/payment-redirect-ui'
+import { refundRecordMeta, refundRecordNotice, refundRecordTitle } from '@/utils/after-sale-ui'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,6 +44,7 @@ const comments = ref<OrderComment[]>([])
 const afterSales = ref<AfterSale[]>([])
 const afterSaleEligibility = ref<AfterSaleEligibility>()
 const payChannel = ref<PayChannel>('mock')
+const payChannels = ref<PaymentChannelOption[]>(buildPaymentChannels())
 const previewImages = ref<string[]>([])
 const previewIndex = ref(0)
 const imageUploading = ref<ImageFormKind | ''>('')
@@ -73,6 +77,8 @@ const returnForm = ref({
 const MAX_FORM_IMAGES = 6
 
 const canPay = computed(() => Number(order.value?.status) === 0)
+const selectedPayChannel = computed(() => payChannels.value.find((item) => item.value === payChannel.value))
+const selectedPayChannelDisabled = computed(() => !selectedPayChannel.value || selectedPayChannel.value.disabled)
 const canCancel = computed(() => Number(order.value?.status) === 0)
 const canReceive = computed(() => Number(order.value?.status) === 2)
 const canComment = computed(() => Number(order.value?.status) === 3)
@@ -295,19 +301,29 @@ async function loadOrder() {
     const res = await getOrderDetail(route.params.id as string)
     order.value = res.data
     if (res.data?.id) {
-      const [commentRes, afterSaleRes, logisticsRes] = await Promise.all([
+      const [commentRes, afterSaleRes, logisticsRes, channelRes] = await Promise.all([
         getOrderComments(res.data.id),
         getOrderAfterSales(res.data.id),
         getOrderLogistics(res.data.id),
+        getPayChannels().catch(() => null),
       ])
       comments.value = commentRes.data || []
       afterSales.value = afterSaleRes.data || []
       logistics.value = logisticsRes.data
+      updatePayChannels(channelRes?.data)
       await loadAfterSaleEligibility(res.data.id)
     }
     await cart.fetchCart()
   } finally {
     loading.value = false
+  }
+}
+
+function updatePayChannels(source?: Parameters<typeof buildPaymentChannels>[0]) {
+  payChannels.value = buildPaymentChannels(source)
+  const active = payChannels.value.find((item) => item.value === payChannel.value)
+  if (!active || active.disabled) {
+    payChannel.value = firstEnabledPaymentChannel(payChannels.value) || 'mock'
   }
 }
 
@@ -458,9 +474,16 @@ async function payOrder() {
   if (!order.value) {
     return
   }
+  const selected = payChannels.value.find((item) => item.value === payChannel.value)
+  if (!selected || selected.disabled) {
+    ElMessage.warning(selected?.desc || '当前支付方式暂不可用')
+    return
+  }
   actionLoading.value = 'pay'
   try {
     const res = await createPay({ orderId: order.value.id, channel: payChannel.value })
+    const redirectAction = resolvePaymentRedirect(res.data)
+    handlePaymentRedirect(redirectAction)
     router.replace({
       path: '/pay/result',
       query: {
@@ -468,6 +491,8 @@ async function payOrder() {
         orderId: String(order.value.id),
         orderNo: order.value.orderNo,
         payNo: res.data.payNo || '',
+        channel: res.data.channel || payChannel.value,
+        bridge: res.data.paid ? '' : redirectBridgeLabel(redirectAction),
       },
     })
   } catch (error: any) {
@@ -483,6 +508,44 @@ async function payOrder() {
   } finally {
     actionLoading.value = ''
   }
+}
+
+function handlePaymentRedirect(action: PaymentRedirectAction) {
+  if (action.kind === 'none') {
+    return
+  }
+  if (action.kind === 'url') {
+    const opened = window.open(action.target, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      window.location.href = action.target
+    }
+    return
+  }
+  if (action.kind === 'html-form') {
+    const opened = window.open('', '_blank', 'noopener,noreferrer')
+    if (opened) {
+      opened.document.open()
+      opened.document.write(action.html)
+      opened.document.close()
+    } else {
+      const formHost = document.createElement('div')
+      formHost.style.display = 'none'
+      formHost.innerHTML = action.html
+      document.body.appendChild(formHost)
+      const form = formHost.querySelector('form') as HTMLFormElement | null
+      form?.submit()
+      setTimeout(() => formHost.remove(), 1000)
+    }
+    return
+  }
+  ElMessage.info(action.text)
+}
+
+function redirectBridgeLabel(action: PaymentRedirectAction) {
+  if (action.kind === 'url') return 'external'
+  if (action.kind === 'html-form') return 'form'
+  if (action.kind === 'info') return 'info'
+  return ''
 }
 
 async function cancelCurrentOrder() {
@@ -772,6 +835,18 @@ onMounted(loadOrder)
                     <dt>退货物流</dt>
                     <dd>{{ item.returnCompany || '-' }} {{ item.returnNo || '' }}</dd>
                   </div>
+                  <div v-if="refundRecordTitle(item.refundRecord)">
+                    <dt>退款记录</dt>
+                    <dd>{{ refundRecordTitle(item.refundRecord) }}</dd>
+                  </div>
+                  <div v-if="refundRecordMeta(item.refundRecord)">
+                    <dt>退款摘要</dt>
+                    <dd>{{ refundRecordMeta(item.refundRecord) }}</dd>
+                  </div>
+                  <div v-if="refundRecordNotice(item.refundRecord)">
+                    <dt>退款进度</dt>
+                    <dd>{{ refundRecordNotice(item.refundRecord) }}</dd>
+                  </div>
                 </dl>
                 <div v-if="item.images?.length" class="after-sale-images">
                   <button
@@ -788,6 +863,9 @@ onMounted(loadOrder)
                   </button>
                 </div>
                 <div v-if="[0, 1, 2].includes(Number(item.status))" class="after-sale-actions">
+                  <el-button size="small" @click="router.push(`/after-sales/${item.id}`)">
+                    查看详情
+                  </el-button>
                   <el-button
                     v-if="Number(item.status) === 1"
                     size="small"
@@ -802,6 +880,11 @@ onMounted(loadOrder)
                     @click="cancelCurrentAfterSale(item)"
                   >
                     取消申请
+                  </el-button>
+                </div>
+                <div v-else class="after-sale-actions">
+                  <el-button size="small" @click="router.push(`/after-sales/${item.id}`)">
+                    查看详情
                   </el-button>
                 </div>
               </article>
@@ -839,8 +922,26 @@ onMounted(loadOrder)
           <div v-if="canPay" class="channel-box">
             <strong>支付方式</strong>
             <el-radio-group v-model="payChannel">
-              <el-radio-button label="mock">模拟支付</el-radio-button>
+              <el-tooltip
+                v-for="item in payChannels"
+                :key="item.value"
+                :content="item.desc"
+                placement="top"
+              >
+                <el-radio-button :value="item.value" :disabled="item.disabled">
+                  {{ item.label }}
+                </el-radio-button>
+              </el-tooltip>
             </el-radio-group>
+            <div class="channel-status-grid">
+              <span
+                v-for="item in payChannels"
+                :key="`${item.value}-status`"
+                :class="{ disabled: item.disabled }"
+              >
+                <b>{{ item.icon }}</b>{{ item.desc }}
+              </span>
+            </div>
           </div>
 
           <div class="action-stack">
@@ -849,6 +950,7 @@ onMounted(loadOrder)
               size="large"
               type="primary"
               :loading="actionLoading === 'pay'"
+              :disabled="selectedPayChannelDisabled"
               @click="payOrder"
             >
               立即支付
@@ -1793,6 +1895,38 @@ onMounted(loadOrder)
 .channel-box strong {
   display: block;
   margin-bottom: 12px;
+}
+
+.channel-status-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.channel-status-grid span {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #2f8f67;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.channel-status-grid span.disabled {
+  color: #8b8f98;
+}
+
+.channel-status-grid b {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #111827;
+  color: #fff;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
 }
 
 .action-stack {

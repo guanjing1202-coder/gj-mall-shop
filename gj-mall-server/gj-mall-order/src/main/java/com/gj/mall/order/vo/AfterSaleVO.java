@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.TypeReference;
 import com.gj.mall.order.entity.OmsAfterSale;
 import com.gj.mall.order.entity.OmsOrderItem;
+import com.gj.mall.order.entity.PayRefundRecord;
 import com.gj.mall.order.enums.OrderStatus;
 import lombok.Data;
 
@@ -39,9 +40,15 @@ public class AfterSaleVO {
     private LocalDateTime refundTime;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
+    private AfterSaleRefundRecordVO refundRecord;
+    private List<AfterSaleTimelineItemVO> timeline;
     private List<OrderItemVO> items;
 
     public static AfterSaleVO from(OmsAfterSale afterSale, List<OmsOrderItem> items) {
+        return from(afterSale, items, null);
+    }
+
+    public static AfterSaleVO from(OmsAfterSale afterSale, List<OmsOrderItem> items, PayRefundRecord refundRecord) {
         AfterSaleVO vo = new AfterSaleVO();
         vo.setId(afterSale.getId());
         vo.setAfterSaleNo(afterSale.getAfterSaleNo());
@@ -67,6 +74,8 @@ public class AfterSaleVO {
         vo.setRefundTime(afterSale.getRefundTime());
         vo.setCreateTime(afterSale.getCreateTime());
         vo.setUpdateTime(afterSale.getUpdateTime());
+        vo.setRefundRecord(AfterSaleRefundRecordVO.from(refundRecord));
+        vo.setTimeline(AfterSaleTimelineBuilder.build(afterSale, refundRecord));
         vo.setItems(items == null ? Collections.emptyList()
                 : items.stream().map(AfterSaleVO::toItemVO).collect(Collectors.toList()));
         return vo;

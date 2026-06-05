@@ -2,6 +2,7 @@ package com.gj.mall.pay.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gj.mall.common.exception.BizException;
+import com.gj.mall.order.entity.OmsOrder;
 import com.gj.mall.order.entity.PayCallbackRecord;
 import com.gj.mall.order.entity.PayPaymentRecord;
 import com.gj.mall.order.mapper.PayCallbackRecordMapper;
@@ -9,9 +10,12 @@ import com.gj.mall.order.mapper.PayPaymentRecordMapper;
 import com.gj.mall.order.service.OrderService;
 import com.gj.mall.pay.config.PayCallbackProperties;
 import com.gj.mall.pay.config.PayRuntimeConfigService;
+import com.gj.mall.pay.dto.PayDTO;
 import com.gj.mall.pay.support.PayCallbackEventSupport;
 import com.gj.mall.pay.support.PayCallbackSignatureSupport;
 import com.gj.mall.pay.strategy.PayStrategy;
+import com.gj.mall.pay.vo.PayChannelVO;
+import com.gj.mall.pay.vo.PayStatusVO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -27,8 +31,10 @@ import java.security.Signature;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -58,6 +64,113 @@ class PayServiceImplTest {
             public void rollback(TransactionStatus status) {
             }
         };
+    }
+
+    @Test
+    void listChannelsDisablesRealChannelsInMockMode() {
+        PayRuntimeConfigService runtimeConfigService = mock(PayRuntimeConfigService.class);
+        when(runtimeConfigService.mode()).thenReturn("mock");
+        PayServiceImpl service = newPayService(mock(OrderService.class),
+                mock(PayPaymentRecordMapper.class),
+                mock(PayCallbackRecordMapper.class),
+                runtimeConfigService);
+
+        List<PayChannelVO> channels = service.listChannels();
+
+        PayChannelVO mockChannel = channel(channels, "mock");
+        PayChannelVO wechat = channel(channels, "wechat");
+        PayChannelVO alipay = channel(channels, "alipay");
+        assertTrue(mockChannel.getEnabled());
+        assertEquals("开发环境即时成功", mockChannel.getStatus());
+        assertEquals(Boolean.FALSE, wechat.getEnabled());
+        assertTrue(wechat.getStatus().contains("mock 支付模式"));
+        assertEquals(Boolean.FALSE, alipay.getEnabled());
+        assertTrue(alipay.getStatus().contains("mock 支付模式"));
+    }
+
+    @Test
+    void listChannelsEnablesAlipayWhenRealConfigReady() {
+        PayRuntimeConfigService runtimeConfigService = mock(PayRuntimeConfigService.class);
+        when(runtimeConfigService.mode()).thenReturn("real");
+        when(runtimeConfigService.alipayAppId()).thenReturn("2021000123456789");
+        when(runtimeConfigService.alipayPrivateKey()).thenReturn("private-key");
+        when(runtimeConfigService.alipayPublicKey()).thenReturn("public-key");
+        when(runtimeConfigService.alipayNotifyUrl()).thenReturn("https://shop.example.com/api/pay/callback/alipay");
+        PayServiceImpl service = newPayService(mock(OrderService.class),
+                mock(PayPaymentRecordMapper.class),
+                mock(PayCallbackRecordMapper.class),
+                runtimeConfigService);
+
+        PayChannelVO alipay = channel(service.listChannels(), "alipay");
+
+        assertEquals(Boolean.TRUE, alipay.getEnabled());
+        assertEquals("可用", alipay.getStatus());
+    }
+
+    @Test
+    void payRejectsDisabledMockChannelInRealMode() {
+        OrderService orderService = mock(OrderService.class);
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayRuntimeConfigService runtimeConfigService = mock(PayRuntimeConfigService.class);
+        when(runtimeConfigService.mode()).thenReturn("real");
+        OmsOrder order = pendingOrder();
+        when(orderService.getByIdOrThrow(order.getId())).thenReturn(order);
+        PayDTO dto = new PayDTO();
+        dto.setOrderId(order.getId());
+        dto.setChannel("mock");
+        PayServiceImpl service = newPayService(orderService,
+                recordMapper,
+                mock(PayCallbackRecordMapper.class),
+                runtimeConfigService);
+
+        BizException error = assertThrows(BizException.class, () -> service.pay(order.getUserId(), dto));
+
+        assertTrue(error.getMessage().contains("真实支付模式"));
+        verify(recordMapper, never()).insert(any(PayPaymentRecord.class));
+    }
+
+    @Test
+    void getStatusReturnsOwnedPaymentWithOrderSnapshot() {
+        OrderService orderService = mock(OrderService.class);
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayServiceImpl service = newPayService(orderService, recordMapper, callbackRecordMapper, null);
+
+        PayPaymentRecord payment = pendingPayment();
+        payment.setStatus(1);
+        when(recordMapper.selectOne(any())).thenReturn(payment);
+        when(orderService.getByIdOrThrow(payment.getOrderId())).thenReturn(paidOrder());
+
+        PayStatusVO status = service.getStatus(1L, "P202605210001");
+
+        assertEquals("P202605210001", status.getPayNo());
+        assertEquals("MOCK-P202605210001", status.getThirdPayNo());
+        assertEquals(9, status.getChannel());
+        assertEquals("MOCK 模拟支付", status.getChannelDesc());
+        assertTrue(status.getPaid());
+        assertEquals(1, status.getStatus());
+        assertEquals("已支付", status.getStatusDesc());
+        assertEquals(new BigDecimal("99.00"), status.getAmount());
+        assertEquals(30L, status.getOrderId());
+        assertEquals("202605210001", status.getOrderNo());
+        assertEquals(1, status.getOrderStatus());
+        assertEquals("待发货", status.getOrderStatusDesc());
+    }
+
+    @Test
+    void getStatusRejectsOtherUsersPayment() {
+        OrderService orderService = mock(OrderService.class);
+        PayPaymentRecordMapper recordMapper = mock(PayPaymentRecordMapper.class);
+        PayCallbackRecordMapper callbackRecordMapper = mock(PayCallbackRecordMapper.class);
+        PayServiceImpl service = newPayService(orderService, recordMapper, callbackRecordMapper, null);
+
+        PayPaymentRecord payment = pendingPayment();
+        payment.setUserId(2L);
+        when(recordMapper.selectOne(any())).thenReturn(payment);
+
+        assertThrows(BizException.class, () -> service.getStatus(1L, "P202605210001"));
+
+        verify(orderService, never()).getByIdOrThrow(any());
     }
 
     @Test
@@ -351,6 +464,26 @@ class PayServiceImplTest {
         return payment;
     }
 
+    private OmsOrder paidOrder() {
+        OmsOrder order = new OmsOrder();
+        order.setId(30L);
+        order.setOrderNo("202605210001");
+        order.setUserId(1L);
+        order.setPayAmount(new BigDecimal("99.00"));
+        order.setStatus(1);
+        return order;
+    }
+
+    private OmsOrder pendingOrder() {
+        OmsOrder order = new OmsOrder();
+        order.setId(30L);
+        order.setOrderNo("202605210001");
+        order.setUserId(1L);
+        order.setPayAmount(new BigDecimal("99.00"));
+        order.setStatus(0);
+        return order;
+    }
+
     private Map<String, Object> callbackPayload(String eventType) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("payNo", "P202605210001");
@@ -390,5 +523,29 @@ class PayServiceImplTest {
         signature.initSign(keyPair.getPrivate());
         signature.update(content.getBytes(StandardCharsets.UTF_8));
         return Base64.getEncoder().encodeToString(signature.sign());
+    }
+
+    private PayServiceImpl newPayService(OrderService orderService,
+                                         PayPaymentRecordMapper recordMapper,
+                                         PayCallbackRecordMapper callbackRecordMapper,
+                                         PayRuntimeConfigService runtimeConfigService) {
+        return new PayServiceImpl(
+                Collections.<PayStrategy>emptyList(),
+                orderService,
+                recordMapper,
+                callbackRecordMapper,
+                new PayCallbackProperties(),
+                runtimeConfigService,
+                new PayCallbackSignatureSupport(),
+                new PayCallbackEventSupport(),
+                new ObjectMapper(),
+                transactionManager);
+    }
+
+    private PayChannelVO channel(List<PayChannelVO> channels, String name) {
+        return channels.stream()
+                .filter(item -> name.equals(item.getName()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("missing channel " + name));
     }
 }

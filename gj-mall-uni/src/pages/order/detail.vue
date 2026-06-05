@@ -226,6 +226,18 @@
               <text>退货物流</text>
               <text>{{ item.returnCompany || '-' }} {{ item.returnNo || '' }}</text>
             </view>
+            <view v-if="refundRecordTitle(item.refundRecord)" class="service-row">
+              <text>退款记录</text>
+              <text>{{ refundRecordTitle(item.refundRecord) }}</text>
+            </view>
+            <view v-if="refundRecordMeta(item.refundRecord)" class="service-row">
+              <text>退款摘要</text>
+              <text>{{ refundRecordMeta(item.refundRecord) }}</text>
+            </view>
+            <view v-if="refundRecordNotice(item.refundRecord)" class="service-row">
+              <text>退款进度</text>
+              <text>{{ refundRecordNotice(item.refundRecord) }}</text>
+            </view>
             <scroll-view v-if="item.images?.length" scroll-x class="service-images">
               <view class="service-image-row">
                 <image
@@ -237,11 +249,12 @@
                 />
               </view>
             </scroll-view>
-            <view v-if="canCancelAfterSale(item.status)" class="service-actions">
+            <view class="service-actions">
+              <button @tap="goAfterSaleDetail(item)">查看详情</button>
               <button v-if="canSubmitReturnLogistics(item.status)" :disabled="serviceActionLoading === item.id" @tap="openReturnDialog(item)">
                 填写物流
               </button>
-              <button class="ghost" :disabled="serviceActionLoading === item.id" @tap="cancelSale(item)">取消售后</button>
+              <button v-if="canCancelAfterSale(item.status)" class="ghost" :disabled="serviceActionLoading === item.id" @tap="cancelSale(item)">取消售后</button>
             </view>
           </view>
         </view>
@@ -375,7 +388,7 @@ import {
   type OrderLogistics,
   type OrderItem,
 } from '@/api/order'
-import { canCancelAfterSale, canSubmitReturnLogistics } from '@/utils/after-sale-ui'
+import { canCancelAfterSale, canSubmitReturnLogistics, refundRecordMeta, refundRecordNotice, refundRecordTitle } from '@/utils/after-sale-ui'
 
 const loading = ref(false)
 const actionLoading = ref(false)
@@ -620,6 +633,10 @@ function openReturnDialog(item: AfterSale) {
   returnForm.returnCompany = item.returnCompany || ''
   returnForm.returnNo = item.returnNo || ''
   returnDialogOpen.value = true
+}
+
+function goAfterSaleDetail(item: AfterSale) {
+  uni.navigateTo({ url: `/pages/after-sales/detail?id=${item.id}` })
 }
 
 async function submitReturnInfo() {
