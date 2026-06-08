@@ -44,7 +44,8 @@ public class UserAddressServiceImpl implements UserAddressService {
         BeanUtil.copyProperties(dto, addr);
         addr.setId(null);
         addr.setUserId(userId);
-        if (addr.getIsDefault() == null) addr.setIsDefault(0);
+        boolean firstAddress = !hasAddress(userId);
+        addr.setIsDefault(normalizeDefault(addr.getIsDefault(), firstAddress));
         if (addr.getIsDefault() == 1) {
             clearDefault(userId);
         }
@@ -60,6 +61,7 @@ public class UserAddressServiceImpl implements UserAddressService {
         UmsUserAddress addr = new UmsUserAddress();
         BeanUtil.copyProperties(dto, addr);
         addr.setUserId(userId);
+        addr.setIsDefault(normalizeDefault(addr.getIsDefault(), Integer.valueOf(1).equals(old.getIsDefault())));
         if (Integer.valueOf(1).equals(addr.getIsDefault()) && !Integer.valueOf(1).equals(old.getIsDefault())) {
             clearDefault(userId);
         }
@@ -89,5 +91,21 @@ public class UserAddressServiceImpl implements UserAddressService {
         mapper.update(upd, Wrappers.<UmsUserAddress>lambdaUpdate()
                 .eq(UmsUserAddress::getUserId, userId)
                 .eq(UmsUserAddress::getIsDefault, 1));
+    }
+
+    private boolean hasAddress(Long userId) {
+        Long count = mapper.selectCount(Wrappers.<UmsUserAddress>lambdaQuery()
+                .eq(UmsUserAddress::getUserId, userId));
+        return count != null && count > 0;
+    }
+
+    private int normalizeDefault(Integer requested, boolean fallbackDefault) {
+        if (Integer.valueOf(1).equals(requested)) {
+            return 1;
+        }
+        if (Integer.valueOf(0).equals(requested)) {
+            return 0;
+        }
+        return fallbackDefault ? 1 : 0;
     }
 }

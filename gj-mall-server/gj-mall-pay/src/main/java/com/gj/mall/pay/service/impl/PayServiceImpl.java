@@ -159,7 +159,16 @@ public class PayServiceImpl implements PayService {
     @Override
     public PayCallbackResultVO handleCallback(String channel, Map<String, Object> payload, Map<String, String> headers) {
         try {
-            return callbackTransactionTemplate().execute(status -> processCallback(channel, payload, headers, null));
+            return callbackTransactionTemplate().execute(status -> processCallback(channel, payload, headers, null, null));
+        } catch (RuntimeException ex) {
+            throw ex;
+        }
+    }
+
+    @Override
+    public PayCallbackResultVO handleVerifiedCallback(String channel, Map<String, Object> payload, Map<String, String> headers) {
+        try {
+            return callbackTransactionTemplate().execute(status -> processCallback(channel, payload, headers, null, 1));
         } catch (RuntimeException ex) {
             throw ex;
         }
@@ -184,7 +193,7 @@ public class PayServiceImpl implements PayService {
                 .orElse(null));
         PayCallbackResultVO result;
         try {
-            result = callbackTransactionTemplate().execute(status -> processCallback(channel, payload, headers, source));
+            result = callbackTransactionTemplate().execute(status -> processCallback(channel, payload, headers, source, null));
         } catch (RuntimeException ex) {
             updateReplaySource(source, 3, source.getErrorMessage(), "重放失败：" + ex.getMessage());
             throw ex;
@@ -193,7 +202,11 @@ public class PayServiceImpl implements PayService {
         return result;
     }
 
-    private PayCallbackResultVO processCallback(String channel, Map<String, Object> payload, Map<String, String> headers, PayCallbackRecord replaySource) {
+    private PayCallbackResultVO processCallback(String channel,
+                                                Map<String, Object> payload,
+                                                Map<String, String> headers,
+                                                PayCallbackRecord replaySource,
+                                                Integer verifiedSignatureStatus) {
         PayChannel payChannel = PayChannel.ofName(channel);
         if (payChannel == null) {
             throw new BizException(ResultCode.PAY_CHANNEL_NOT_SUPPORT, "未知回调渠道：" + channel);
@@ -220,9 +233,14 @@ public class PayServiceImpl implements PayService {
         callbackRecord.setRawData(rawData);
         callbackRecord.setRequestHeaders(toJson(safeHeaders));
 
-        int signatureStatus = replaySource == null
-                ? signatureSupport.verify(payChannel, safePayload, safeHeaders, runtimeCallbackProperties(), runtimeConfigService).status()
-                : replaySource.getSignatureStatus();
+        int signatureStatus;
+        if (replaySource != null) {
+            signatureStatus = replaySource.getSignatureStatus();
+        } else if (verifiedSignatureStatus != null) {
+            signatureStatus = verifiedSignatureStatus;
+        } else {
+            signatureStatus = signatureSupport.verify(payChannel, safePayload, safeHeaders, runtimeCallbackProperties(), runtimeConfigService).status();
+        }
         callbackRecord.setSignatureStatus(signatureStatus);
         if (signatureStatus == 2) {
             callbackRecord.setProcessStatus(3);

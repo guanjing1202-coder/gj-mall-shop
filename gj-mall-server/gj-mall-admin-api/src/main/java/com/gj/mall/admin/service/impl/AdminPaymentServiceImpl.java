@@ -741,9 +741,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         if (!validation.pathValid) {
             return "回调地址路径需为 " + WECHAT_CALLBACK_PATH;
         }
-        return runtimeConfigService.wechatPrivateKeyFileReadable()
-                ? "商户配置已填写，私钥文件可读取，等待 SDK 接入"
-                : "私钥文件不可读";
+        return runtimeConfigService.wechatPrivateKeyFileReadable() ? "可用" : "私钥文件不可读";
     }
 
     private String alipayChannelStatus(boolean realMode) {
@@ -761,7 +759,7 @@ public class AdminPaymentServiceImpl implements AdminPaymentService {
         if (!validation.pathValid) {
             return "回调地址路径需为 " + ALIPAY_CALLBACK_PATH;
         }
-        return "应用配置已填写，等待 SDK 接入";
+        return "可用";
     }
 
     private List<String> missingWechatKeys() {

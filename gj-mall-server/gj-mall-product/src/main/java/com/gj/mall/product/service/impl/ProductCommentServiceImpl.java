@@ -84,6 +84,10 @@ public class ProductCommentServiceImpl implements ProductCommentService {
                 .filter(Objects::nonNull)
                 .mapToLong(Integer::longValue)
                 .sum();
+        long scoreCount = comments.stream()
+                .map(PmsProductComment::getScore)
+                .filter(Objects::nonNull)
+                .count();
         long goodCount = comments.stream()
                 .filter(comment -> comment.getScore() != null && comment.getScore() >= 4)
                 .count();
@@ -92,7 +96,9 @@ public class ProductCommentServiceImpl implements ProductCommentService {
                         && !comment.getImages().trim().isEmpty()
                         && !"[]".equals(comment.getImages().trim()))
                 .count();
-        vo.setAverageScore(BigDecimal.valueOf(scoreSum).divide(BigDecimal.valueOf(total), 1, RoundingMode.HALF_UP));
+        vo.setAverageScore(scoreCount == 0
+                ? BigDecimal.ZERO
+                : BigDecimal.valueOf(scoreSum).divide(BigDecimal.valueOf(scoreCount), 1, RoundingMode.HALF_UP));
         vo.setGoodCount(goodCount);
         vo.setGoodRate(BigDecimal.valueOf(goodCount * 100).divide(BigDecimal.valueOf(total), 1, RoundingMode.HALF_UP));
         vo.setImageCount(imageCount);

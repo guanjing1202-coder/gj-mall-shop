@@ -1,10 +1,10 @@
-package com.gj.mall.product.controller;
+package com.gj.mall.search.controller;
 
 import com.gj.mall.common.result.Result;
 import com.gj.mall.framework.security.AuthExclude;
-import com.gj.mall.product.service.ProductSearchService;
-import com.gj.mall.product.vo.SearchHotWordVO;
-import com.gj.mall.product.vo.SearchSuggestVO;
+import com.gj.mall.search.service.ProductSearchService;
+import com.gj.mall.search.vo.SearchHotWordVO;
+import com.gj.mall.search.vo.SearchSuggestVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;

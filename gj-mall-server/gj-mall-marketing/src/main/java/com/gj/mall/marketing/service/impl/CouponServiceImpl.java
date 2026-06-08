@@ -203,6 +203,7 @@ public class CouponServiceImpl implements CouponService {
             result.setDiscountAmount(BigDecimal.ZERO);
             return result;
         }
+        BigDecimal amount = orderAmount == null ? BigDecimal.ZERO : orderAmount.max(BigDecimal.ZERO);
         SmsCouponUser cu = couponUserMapper.selectOne(
                 Wrappers.<SmsCouponUser>lambdaQuery()
                         .eq(SmsCouponUser::getCouponId, couponId)
@@ -214,11 +215,11 @@ public class CouponServiceImpl implements CouponService {
         if (!Integer.valueOf(1).equals(c.getStatus())) throw new BizException(ResultCode.COUPON_NOT_FOUND, "优惠券未启用");
         if (c.getStartTime() != null && now.isBefore(c.getStartTime())) throw new BizException(ResultCode.COUPON_EXPIRED, "优惠券未到可用时间");
         if (c.getEndTime() != null && now.isAfter(c.getEndTime())) throw new BizException(ResultCode.COUPON_EXPIRED);
-        if (c.getMinAmount() != null && orderAmount.compareTo(c.getMinAmount()) < 0) {
+        if (c.getMinAmount() != null && amount.compareTo(c.getMinAmount()) < 0) {
             throw new BizException(ResultCode.COUPON_NOT_MATCH,
                     "需满 " + c.getMinAmount() + " 元才可使用");
         }
-        BigDecimal discount = calcDiscount(c, orderAmount);
+        BigDecimal discount = calcDiscount(c, amount);
         result.setDiscountAmount(discount);
         result.setCouponUserId(cu.getId());
         return result;
@@ -310,7 +311,8 @@ public class CouponServiceImpl implements CouponService {
             throw new BizException(ResultCode.COUPON_NOT_FOUND, "优惠券未开放领取");
         }
         LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(c.getStartTime()) || now.isAfter(c.getEndTime())) {
+        if ((c.getStartTime() != null && now.isBefore(c.getStartTime()))
+                || (c.getEndTime() != null && now.isAfter(c.getEndTime()))) {
             throw new BizException(ResultCode.COUPON_EXPIRED, "优惠券不在有效期内");
         }
     }

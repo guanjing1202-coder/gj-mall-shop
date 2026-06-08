@@ -34,7 +34,7 @@ gj-mall-shop/
 | 商品与搜索 | 商品分类、品牌、SKU、库存、商品详情、搜索联想、移动端搜索适配 |
 | 购物车与结算 | 购物车管理、优惠券试算、运费展示、发票信息、PC/H5 下单 |
 | 订单履约 | 订单列表与详情、支付后履约、发货、物流提示、确认收货、订单状态流转 |
-| 支付退款 | Mock 支付、支付回调记录、回调签名样例、失败回调重放、支付状态同步、退款资格判断、全额退款确认、退款成功消息通知 |
+| 支付退款 | Mock 支付、微信 Native Pay、支付宝 Page Pay、支付回调记录、回调签名样例、失败回调重放、支付状态同步、退款资格判断、全额退款确认、退款成功消息通知 |
 | 售后 | 用户申请售后、后台创建售后、审核、退货物流、确认收货、退款记录、售后资格校验 |
 | 营销 | 优惠券、秒杀活动、活动库存、后台营销管理 |
 | 消息中心 | 订单、物流、支付、售后消息，未读统计，全部已读，清空已读 |
@@ -149,7 +149,7 @@ gj-mall-server/
 ├─ gj-mall-order        # 订单、售后、物流、评价、超时消息
 ├─ gj-mall-pay          # 支付策略、支付记录、回调
 ├─ gj-mall-marketing    # 优惠券、秒杀
-├─ gj-mall-search       # 搜索模块预留
+├─ gj-mall-search       # 搜索体验：热搜词、搜索建议、同义词兜底
 ├─ gj-mall-admin-api    # 后台管理 API
 └─ gj-mall-app          # Spring Boot 启动模块
 ```
@@ -254,6 +254,27 @@ PayService
 ```
 
 开发环境默认适合使用 Mock 支付。后台支付管理支持查看支付汇总、回调验签样例、最近渠道回调、失败回调重放、按成功回调同步支付状态、退款资格展示、全额退款确认和退款失败重试。后台直接全额退款成功后会写入用户消息中心，用户可在 PC/H5 消息中心看到“退款已完成”通知。
+
+如需启用真实支付，先将 `mall.pay.mode` 配置为 `real`。支付配置优先读取后台系统配置表 `sys_config`，没有配置时再读取 Spring 配置或环境变量。真实渠道需要补齐以下配置：
+
+```text
+mall.pay.callback.require-signature=true
+mall.pay.callback.secret=<自定义回调密钥>
+
+mall.pay.wechat.app-id=<微信应用 AppID>
+mall.pay.wechat.mch-id=<微信商户号>
+mall.pay.wechat.api-v3-key=<微信 APIv3 密钥>
+mall.pay.wechat.merchant-serial-no=<微信商户证书序列号>
+mall.pay.wechat.private-key-path=<服务进程可读取的商户私钥文件路径>
+mall.pay.wechat.notify-url=https://<域名>/api/pay/callback/wechat
+
+mall.pay.alipay.app-id=<支付宝应用 AppID>
+mall.pay.alipay.private-key=<应用私钥>
+mall.pay.alipay.alipay-public-key=<支付宝公钥>
+mall.pay.alipay.notify-url=https://<域名>/api/pay/callback/alipay
+```
+
+真实支付回调必须使用公网可访问的 HTTPS 地址。微信回调路径固定为 `/api/pay/callback/wechat`，支付宝回调路径固定为 `/api/pay/callback/alipay`。本地单测只能验证 SDK 调用封装、配置校验、签名/回调解析和订单入账逻辑；真实扣款、渠道验签、回调送达仍需要有效商户号、证书、私钥和 HTTPS 回调域名做联调。
 
 订单模块包含普通下单、秒杀下单、支付结果、售后申请、订单评价、物流查询等能力。库存和订单超时释放依赖 Redis 与 RabbitMQ。
 

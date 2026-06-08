@@ -69,6 +69,24 @@ public class SeckillServiceImpl implements SeckillService {
             "redis.call('expire', KEYS[2], tonumber(ARGV[3]))\n" +
             "return stock - qty\n";
 
+    /**
+     * 释放秒杀库存：只有已锁定数量大于 0 时才回补库存，避免重复释放把购买标记扣成负数。
+     * KEYS[1] = stock key
+     * KEYS[2] = order flag key
+     * ARGV[1] = 释放数量
+     * 返回释放后的已锁定数量；-1 表示没有可释放的锁定数量
+     */
+    private static final String RELEASE_LUA =
+            "local ordered = tonumber(redis.call('get', KEYS[2]) or '0')\n" +
+            "local qty = tonumber(ARGV[1])\n" +
+            "if ordered <= 0 then return -1 end\n" +
+            "local release = qty\n" +
+            "if ordered < qty then release = ordered end\n" +
+            "redis.call('incrby', KEYS[1], release)\n" +
+            "local remain = redis.call('decrby', KEYS[2], release)\n" +
+            "if remain <= 0 then redis.call('del', KEYS[2]) end\n" +
+            "return remain\n";
+
     private final SmsSeckillMapper seckillMapper;
     private final SmsSeckillSkuMapper seckillSkuMapper;
     private final PmsSkuMapper skuMapper;
@@ -143,11 +161,14 @@ public class SeckillServiceImpl implements SeckillService {
     public void releaseStock(Long seckillSkuId, Long userId) {
         SmsSeckillSku sku = seckillSkuMapper.selectById(seckillSkuId);
         if (sku == null) return;
-        // 归还 Redis 库存
-        redis.opsForValue().increment(STOCK_KEY_PREFIX + seckillSkuId);
         String orderFlagKey = ORDER_FLAG_PREFIX + sku.getSeckillId() + ":" + userId;
-        redis.opsForValue().decrement(orderFlagKey);
-        log.info("[seckill] released stock seckillSkuId={} userId={}", seckillSkuId, userId);
+        RedisScript<Long> script = RedisScript.of(RELEASE_LUA, Long.class);
+        Long result = redis.execute(script,
+                Arrays.asList(STOCK_KEY_PREFIX + seckillSkuId, orderFlagKey),
+                "1");
+        if (result != null && result >= 0L) {
+            log.info("[seckill] released stock seckillSkuId={} userId={} lockedRemain={}", seckillSkuId, userId, result);
+        }
     }
 
     /** 支付成功后更新 DB sold_count */

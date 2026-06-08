@@ -49,6 +49,8 @@
         <fastjson2.version>2.0.49</fastjson2.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <lombok.version>1.18.30</lombok.version>
+        <wechatpay-java.version>0.2.17</wechatpay-java.version>
+        <alipay-sdk-java.version>4.40.837.ALL</alipay-sdk-java.version>
     </properties>
 
     <dependencyManagement>
@@ -173,6 +175,18 @@
                 <groupId>com.alibaba.fastjson2</groupId>
                 <artifactId>fastjson2</artifactId>
                 <version>${fastjson2.version}</version>
+            </dependency>
+
+            <!-- Payment SDKs -->
+            <dependency>
+                <groupId>com.github.wechatpay-apiv3</groupId>
+                <artifactId>wechatpay-java</artifactId>
+                <version>${wechatpay-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.alipay.sdk</groupId>
+                <artifactId>alipay-sdk-java</artifactId>
+                <version>${alipay-sdk-java.version}</version>
             </dependency>
 
             <!-- MapStruct -->

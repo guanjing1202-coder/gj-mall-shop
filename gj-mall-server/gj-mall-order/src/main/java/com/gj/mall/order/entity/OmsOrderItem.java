@@ -27,6 +27,8 @@ public class OmsOrderItem implements Serializable {
 
     private Long spuId;
     private Long skuId;
+    /** 秒杀订单项关联 sms_seckill_sku.id，普通订单为空 */
+    private Long seckillSkuId;
     private String skuName;
     private String skuImage;
 
