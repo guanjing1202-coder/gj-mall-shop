@@ -32,6 +32,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AdminMemberServiceImpl implements AdminMemberService {
 
+    private static final long MAX_PAGE_SIZE = 100L;
+
     private final UmsUserMapper userMapper;
     private final UmsUserAddressMapper addressMapper;
     private final OmsOrderMapper orderMapper;
@@ -39,18 +41,19 @@ public class AdminMemberServiceImpl implements AdminMemberService {
 
     @Override
     public PageResult<MemberDetailVO> page(MemberQueryDTO query) {
-        long pageNum = query.getPageNum() == null || query.getPageNum() <= 0 ? 1 : query.getPageNum();
-        long pageSize = query.getPageSize() == null || query.getPageSize() <= 0 ? 10 : query.getPageSize();
+        MemberQueryDTO actualQuery = query == null ? new MemberQueryDTO() : query;
+        long pageNum = actualQuery.getPageNum() == null || actualQuery.getPageNum() <= 0 ? 1 : actualQuery.getPageNum();
+        long pageSize = normalizePageSize(actualQuery.getPageSize());
         Page<UmsUser> page = new Page<>(pageNum, pageSize);
         IPage<UmsUser> result = userMapper.selectPage(page,
                 Wrappers.<UmsUser>lambdaQuery()
-                        .and(StrUtil.isNotBlank(query.getKeyword()), w -> w
-                                .like(UmsUser::getUsername, query.getKeyword())
+                        .and(StrUtil.isNotBlank(actualQuery.getKeyword()), w -> w
+                                .like(UmsUser::getUsername, actualQuery.getKeyword())
                                 .or()
-                                .like(UmsUser::getNickname, query.getKeyword())
+                                .like(UmsUser::getNickname, actualQuery.getKeyword())
                                 .or()
-                                .like(UmsUser::getPhone, query.getKeyword()))
-                        .eq(query.getStatus() != null, UmsUser::getStatus, query.getStatus())
+                                .like(UmsUser::getPhone, actualQuery.getKeyword()))
+                        .eq(actualQuery.getStatus() != null, UmsUser::getStatus, actualQuery.getStatus())
                         .orderByDesc(UmsUser::getCreateTime));
         if (CollUtil.isEmpty(result.getRecords())) {
             return PageResult.empty(result.getCurrent(), result.getSize());
@@ -153,7 +156,7 @@ public class AdminMemberServiceImpl implements AdminMemberService {
         wrapper.select(
                 "user_id",
                 "COUNT(*) AS order_count",
-                "COALESCE(SUM(CASE WHEN status IN (1, 2, 3) THEN pay_amount ELSE 0 END), 0) AS paid_amount");
+                "COALESCE(SUM(CASE WHEN status IN (1, 2, 3, 5, 6) THEN pay_amount ELSE 0 END), 0) AS paid_amount");
         wrapper.in("user_id", userIds);
         wrapper.groupBy("user_id");
         List<Map<String, Object>> rows = orderMapper.selectMaps(wrapper);
@@ -165,6 +168,13 @@ public class AdminMemberServiceImpl implements AdminMemberService {
             map.put(userId, new OrderSummary(orderCount, paidAmount));
         }
         return map;
+    }
+
+    private long normalizePageSize(Long pageSize) {
+        if (pageSize == null || pageSize <= 0) {
+            return 10L;
+        }
+        return Math.min(pageSize, MAX_PAGE_SIZE);
     }
 
     private Map<Long, BrowseHistorySummary> loadBrowseHistorySummaries(List<Long> userIds) {

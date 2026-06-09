@@ -20,26 +20,29 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AdminOperationLogServiceImpl implements AdminOperationLogService {
 
+    private static final long MAX_PAGE_SIZE = 100L;
+
     private final SysOperationLogMapper operationLogMapper;
 
     @Override
     public PageResult<AdminOperationLogVO> page(AdminOperationLogQueryDTO query) {
-        long pageNum = normalizePageNum(query.getPageNum());
-        long pageSize = normalizePageSize(query.getPageSize());
+        AdminOperationLogQueryDTO actualQuery = query == null ? new AdminOperationLogQueryDTO() : query;
+        long pageNum = normalizePageNum(actualQuery.getPageNum());
+        long pageSize = normalizePageSize(actualQuery.getPageSize());
         IPage<SysOperationLog> result = operationLogMapper.selectPage(
                 new Page<>(pageNum, pageSize),
                 Wrappers.<SysOperationLog>lambdaQuery()
-                        .and(StrUtil.isNotBlank(query.getKeyword()), w -> w
-                                .like(SysOperationLog::getUsername, query.getKeyword())
+                        .and(StrUtil.isNotBlank(actualQuery.getKeyword()), w -> w
+                                .like(SysOperationLog::getUsername, actualQuery.getKeyword())
                                 .or()
-                                .like(SysOperationLog::getModule, query.getKeyword())
+                                .like(SysOperationLog::getModule, actualQuery.getKeyword())
                                 .or()
-                                .like(SysOperationLog::getOperation, query.getKeyword())
+                                .like(SysOperationLog::getOperation, actualQuery.getKeyword())
                                 .or()
-                                .like(SysOperationLog::getRequestUri, query.getKeyword()))
-                        .eq(query.getAdminId() != null, SysOperationLog::getAdminId, query.getAdminId())
-                        .eq(StrUtil.isNotBlank(query.getRequestMethod()), SysOperationLog::getRequestMethod, query.getRequestMethod())
-                        .eq(query.getStatus() != null, SysOperationLog::getStatus, query.getStatus())
+                                .like(SysOperationLog::getRequestUri, actualQuery.getKeyword()))
+                        .eq(actualQuery.getAdminId() != null, SysOperationLog::getAdminId, actualQuery.getAdminId())
+                        .eq(StrUtil.isNotBlank(actualQuery.getRequestMethod()), SysOperationLog::getRequestMethod, actualQuery.getRequestMethod())
+                        .eq(actualQuery.getStatus() != null, SysOperationLog::getStatus, actualQuery.getStatus())
                         .orderByDesc(SysOperationLog::getCreateTime)
                         .orderByDesc(SysOperationLog::getId));
         if (CollUtil.isEmpty(result.getRecords())) {
@@ -54,6 +57,9 @@ public class AdminOperationLogServiceImpl implements AdminOperationLogService {
 
     @Override
     public void record(SysOperationLog log) {
+        if (log == null) {
+            return;
+        }
         operationLogMapper.insert(log);
     }
 
@@ -62,6 +68,9 @@ public class AdminOperationLogServiceImpl implements AdminOperationLogService {
     }
 
     private long normalizePageSize(Long pageSize) {
-        return pageSize == null || pageSize <= 0 ? 10 : pageSize;
+        if (pageSize == null || pageSize <= 0) {
+            return 10;
+        }
+        return Math.min(pageSize, MAX_PAGE_SIZE);
     }
 }

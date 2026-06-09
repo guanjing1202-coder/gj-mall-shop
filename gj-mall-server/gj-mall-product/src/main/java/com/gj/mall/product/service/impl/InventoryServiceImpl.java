@@ -45,6 +45,7 @@ public class InventoryServiceImpl implements InventoryService {
 
     private static final int LOW_STOCK_THRESHOLD = 10;
     private static final int MAX_DELTA = 999999;
+    private static final long MAX_PAGE_SIZE = 100L;
 
     private final PmsSkuMapper skuMapper;
     private final PmsSpuMapper spuMapper;
@@ -177,13 +178,14 @@ public class InventoryServiceImpl implements InventoryService {
 
     @Override
     public PageResult<AdminInventoryLogVO> logPage(AdminInventoryLogQueryDTO query) {
-        long pageNum = normalizePageNum(query.getPageNum());
-        long pageSize = normalizePageSize(query.getPageSize());
+        AdminInventoryLogQueryDTO actualQuery = normalizeLogQuery(query);
+        long pageNum = normalizePageNum(actualQuery.getPageNum());
+        long pageSize = normalizePageSize(actualQuery.getPageSize());
         IPage<PmsInventoryLog> result = inventoryLogMapper.selectPage(
                 new Page<>(pageNum, pageSize),
                 Wrappers.<PmsInventoryLog>lambdaQuery()
-                        .eq(query.getSkuId() != null, PmsInventoryLog::getSkuId, query.getSkuId())
-                        .eq(query.getSpuId() != null, PmsInventoryLog::getSpuId, query.getSpuId())
+                        .eq(actualQuery.getSkuId() != null, PmsInventoryLog::getSkuId, actualQuery.getSkuId())
+                        .eq(actualQuery.getSpuId() != null, PmsInventoryLog::getSpuId, actualQuery.getSpuId())
                         .orderByDesc(PmsInventoryLog::getCreateTime));
         return new PageResult<>(
                 result.getTotal(),
@@ -266,7 +268,7 @@ public class InventoryServiceImpl implements InventoryService {
         if (stock == 0) {
             vo.setStockStatus("empty");
             vo.setStockStatusDesc("无可用库存");
-        } else if (stock <= LOW_STOCK_THRESHOLD) {
+        } else if (stock <= warnStock) {
             vo.setStockStatus("low");
             vo.setStockStatusDesc("低库存");
         } else {
@@ -307,6 +309,13 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     private long normalizePageSize(Long pageSize) {
-        return pageSize == null || pageSize <= 0 ? 10 : pageSize;
+        if (pageSize == null || pageSize <= 0) {
+            return 10L;
+        }
+        return Math.min(pageSize, MAX_PAGE_SIZE);
+    }
+
+    private AdminInventoryLogQueryDTO normalizeLogQuery(AdminInventoryLogQueryDTO query) {
+        return query == null ? new AdminInventoryLogQueryDTO() : query;
     }
 }

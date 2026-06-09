@@ -256,12 +256,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     }
 
     private BigDecimal sumPayAmount(LocalDateTime start, LocalDateTime end) {
-        List<Integer> paidStatuses = Arrays.asList(
-                OrderStatus.PENDING_DELIVERY.getCode(),
-                OrderStatus.PENDING_RECEIVE.getCode(),
-                OrderStatus.COMPLETED.getCode()
-        );
-        return sumPayAmountByStatuses(paidStatuses, start, end);
+        return sumPayAmountByStatuses(paidStatusCodes(), start, end);
     }
 
     private BigDecimal sumPayAmountByStatuses(List<Integer> statuses, LocalDateTime start, LocalDateTime end) {
@@ -287,13 +282,17 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
 
     private Long paidOrderCount() {
         return orderMapper.selectCount(Wrappers.<OmsOrder>lambdaQuery()
-                .in(OmsOrder::getStatus, Arrays.asList(
-                        OrderStatus.PENDING_DELIVERY.getCode(),
-                        OrderStatus.PENDING_RECEIVE.getCode(),
-                        OrderStatus.COMPLETED.getCode(),
-                        OrderStatus.REFUNDING.getCode(),
-                        OrderStatus.REFUNDED.getCode()
-                )));
+                .in(OmsOrder::getStatus, paidStatusCodes()));
+    }
+
+    private List<Integer> paidStatusCodes() {
+        return Arrays.asList(
+                OrderStatus.PENDING_DELIVERY.getCode(),
+                OrderStatus.PENDING_RECEIVE.getCode(),
+                OrderStatus.COMPLETED.getCode(),
+                OrderStatus.REFUNDING.getCode(),
+                OrderStatus.REFUNDED.getCode()
+        );
     }
 
     private BigDecimal sumRefundAmount(LocalDateTime start, LocalDateTime end) {
