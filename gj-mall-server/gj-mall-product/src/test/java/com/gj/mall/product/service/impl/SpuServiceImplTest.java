@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gj.mall.common.exception.BizException;
 import com.gj.mall.common.result.PageResult;
 import com.gj.mall.product.doc.ProductDetailDoc;
+import com.gj.mall.product.dto.AdminSpuOperationDTO;
 import com.gj.mall.product.dto.SkuDTO;
 import com.gj.mall.product.dto.SpuQueryDTO;
 import com.gj.mall.product.dto.SpuSaveDTO;
@@ -202,6 +203,57 @@ class SpuServiceImplTest {
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("商品信息不能为空");
         verify(spuMapper, never()).selectById(any());
+    }
+
+    @Test
+    void publishRejectsMissingIdBeforeTouchingMapper() {
+        PmsSpuMapper spuMapper = mock(PmsSpuMapper.class);
+        SpuServiceImpl service = service(spuMapper, mock(PmsSkuMapper.class),
+                mock(PmsCategoryMapper.class), mock(PmsBrandMapper.class), mock(ProductDetailRepository.class));
+
+        assertThatThrownBy(() -> service.publish(null, 1))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("缺少 SPU ID");
+        verify(spuMapper, never()).selectById(any());
+        verify(spuMapper, never()).updateById(any(PmsSpu.class));
+    }
+
+    @Test
+    void updateOperationRejectsMissingIdBeforeTouchingMapper() {
+        PmsSpuMapper spuMapper = mock(PmsSpuMapper.class);
+        SpuServiceImpl service = service(spuMapper, mock(PmsSkuMapper.class),
+                mock(PmsCategoryMapper.class), mock(PmsBrandMapper.class), mock(ProductDetailRepository.class));
+
+        assertThatThrownBy(() -> service.updateOperation(null, new AdminSpuOperationDTO()))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("缺少 SPU ID");
+        verify(spuMapper, never()).selectById(any());
+        verify(spuMapper, never()).updateById(any(PmsSpu.class));
+    }
+
+    @Test
+    void updateOperationRejectsEmptyOperationBeforeUpdating() {
+        PmsSpuMapper spuMapper = mock(PmsSpuMapper.class);
+        SpuServiceImpl service = service(spuMapper, mock(PmsSkuMapper.class),
+                mock(PmsCategoryMapper.class), mock(PmsBrandMapper.class), mock(ProductDetailRepository.class));
+
+        assertThatThrownBy(() -> service.updateOperation(10L, new AdminSpuOperationDTO()))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("运营设置不能为空");
+        verify(spuMapper, never()).updateById(any(PmsSpu.class));
+    }
+
+    @Test
+    void deleteRejectsMissingIdBeforeTouchingMapper() {
+        PmsSpuMapper spuMapper = mock(PmsSpuMapper.class);
+        SpuServiceImpl service = service(spuMapper, mock(PmsSkuMapper.class),
+                mock(PmsCategoryMapper.class), mock(PmsBrandMapper.class), mock(ProductDetailRepository.class));
+
+        assertThatThrownBy(() -> service.delete(null))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("缺少 SPU ID");
+        verify(spuMapper, never()).selectById(any());
+        verify(spuMapper, never()).deleteById(any());
     }
 
     private SpuServiceImpl service(PmsSpuMapper spuMapper,

@@ -624,6 +624,7 @@ public class SpuServiceImpl implements SpuService {
 
     @Override
     public void publish(Long id, Integer status) {
+        validateSpuId(id);
         if (status == null || (status != 0 && status != 1)) {
             throw new BizException(ResultCode.PARAM_ERROR, "上下架状态非法");
         }
@@ -637,8 +638,12 @@ public class SpuServiceImpl implements SpuService {
 
     @Override
     public void updateOperation(Long id, AdminSpuOperationDTO dto) {
+        validateSpuId(id);
         if (dto == null) {
             throw new BizException(ResultCode.PARAM_MISSING, "缺少运营设置");
+        }
+        if (!hasOperationSetting(dto)) {
+            throw new BizException(ResultCode.PARAM_MISSING, "运营设置不能为空");
         }
         PmsSpu spu = spuMapper.selectById(id);
         if (spu == null) throw new BizException(ResultCode.PRODUCT_NOT_FOUND);
@@ -666,6 +671,7 @@ public class SpuServiceImpl implements SpuService {
     @Override
     @Transactional
     public void delete(Long id) {
+        validateSpuId(id);
         PmsSpu spu = spuMapper.selectById(id);
         if (spu == null) return;
         spuMapper.deleteById(id);
@@ -687,6 +693,19 @@ public class SpuServiceImpl implements SpuService {
             throw new BizException(ResultCode.PARAM_ERROR, fieldName + "非法");
         }
         return value;
+    }
+
+    private void validateSpuId(Long id) {
+        if (id == null) {
+            throw new BizException(ResultCode.PARAM_MISSING, "缺少 SPU ID");
+        }
+    }
+
+    private boolean hasOperationSetting(AdminSpuOperationDTO dto) {
+        return dto.getPublishStatus() != null
+                || dto.getNewStatus() != null
+                || dto.getRecommendStatus() != null
+                || dto.getSort() != null;
     }
 
     private SpuQueryDTO normalizeQuery(SpuQueryDTO query) {
