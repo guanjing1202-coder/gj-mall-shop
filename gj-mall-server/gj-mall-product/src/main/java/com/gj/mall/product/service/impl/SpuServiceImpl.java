@@ -43,6 +43,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SpuServiceImpl implements SpuService {
 
+    private static final long MAX_PAGE_SIZE = 100L;
+
     private final PmsSpuMapper spuMapper;
     private final PmsSkuMapper skuMapper;
     private final PmsCategoryMapper categoryMapper;
@@ -52,20 +54,19 @@ public class SpuServiceImpl implements SpuService {
 
     @Override
     public PageResult<SpuListVO> pagePublic(SpuQueryDTO query) {
-        if (query.getPublishStatus() == null) {
-            query.setPublishStatus(1);
-        }
-        return doPage(query);
+        SpuQueryDTO actualQuery = normalizeQuery(query);
+        actualQuery.setPublishStatus(1);
+        return doPage(actualQuery);
     }
 
     @Override
     public PageResult<SpuListVO> pageAdmin(SpuQueryDTO query) {
-        return doPage(query);
+        return doPage(normalizeQuery(query));
     }
 
     private PageResult<SpuListVO> doPage(SpuQueryDTO q) {
-        long pageNum = q.getCurrent() == null ? 1 : q.getCurrent();
-        long pageSize = q.getSize() == null ? 20 : q.getSize();
+        long pageNum = normalizePageNum(q.getCurrent());
+        long pageSize = normalizePageSize(q.getSize());
         Page<PmsSpu> page = new Page<>(pageNum, pageSize);
         List<String> keywordTerms = splitKeyword(q.getKeyword());
         Map<String, List<Long>> keywordRelation = resolveKeywordRelations(keywordTerms);
@@ -511,9 +512,11 @@ public class SpuServiceImpl implements SpuService {
     @Override
     @Transactional
     public Long create(SpuSaveDTO dto) {
+        validateSpuSaveDTO(dto, false);
         PmsSpu spu = new PmsSpu();
         BeanUtil.copyProperties(dto, spu, "images", "skus");
         spu.setId(null);
+        spu.setName(StrUtil.trim(dto.getName()));
         spu.setImages(JSON.toJSONString(dto.getImages() == null ? Collections.emptyList() : dto.getImages()));
         if (spu.getPublishStatus() == null) spu.setPublishStatus(0);
         spu.setNewStatus(0);
@@ -548,11 +551,8 @@ public class SpuServiceImpl implements SpuService {
 
         // 插入 SKU
         for (SkuDTO sd : dto.getSkus()) {
-            PmsSku sku = new PmsSku();
-            BeanUtil.copyProperties(sd, sku, "specData");
-            sku.setId(null);
+            PmsSku sku = buildSku(sd);
             sku.setSpuId(spu.getId());
-            sku.setSpecData(sd.getSpecData() == null ? null : JSON.toJSONString(sd.getSpecData()));
             sku.setLockedStock(0);
             sku.setSaleCount(0);
             skuMapper.insert(sku);
@@ -564,12 +564,13 @@ public class SpuServiceImpl implements SpuService {
     @Override
     @Transactional
     public void update(SpuSaveDTO dto) {
-        if (dto.getId() == null) throw new BizException(ResultCode.PARAM_MISSING, "缺少 SPU ID");
+        validateSpuSaveDTO(dto, true);
         PmsSpu old = spuMapper.selectById(dto.getId());
         if (old == null) throw new BizException(ResultCode.PRODUCT_NOT_FOUND);
 
         PmsSpu spu = new PmsSpu();
         BeanUtil.copyProperties(dto, spu, "images", "skus");
+        spu.setName(StrUtil.trim(dto.getName()));
         if (dto.getImages() != null) {
             spu.setImages(JSON.toJSONString(dto.getImages()));
         }
@@ -612,11 +613,8 @@ public class SpuServiceImpl implements SpuService {
         if (CollUtil.isNotEmpty(dto.getSkus())) {
             skuMapper.delete(Wrappers.<PmsSku>lambdaQuery().eq(PmsSku::getSpuId, old.getId()));
             for (SkuDTO sd : dto.getSkus()) {
-                PmsSku sku = new PmsSku();
-                BeanUtil.copyProperties(sd, sku, "specData");
-                sku.setId(null);
+                PmsSku sku = buildSku(sd);
                 sku.setSpuId(old.getId());
-                sku.setSpecData(sd.getSpecData() == null ? null : JSON.toJSONString(sd.getSpecData()));
                 if (sku.getLockedStock() == null) sku.setLockedStock(0);
                 if (sku.getSaleCount() == null) sku.setSaleCount(0);
                 skuMapper.insert(sku);
@@ -689,5 +687,78 @@ public class SpuServiceImpl implements SpuService {
             throw new BizException(ResultCode.PARAM_ERROR, fieldName + "非法");
         }
         return value;
+    }
+
+    private SpuQueryDTO normalizeQuery(SpuQueryDTO query) {
+        SpuQueryDTO actualQuery = query == null ? new SpuQueryDTO() : query;
+        actualQuery.setKeyword(StrUtil.trim(actualQuery.getKeyword()));
+        actualQuery.setSort(StrUtil.trim(actualQuery.getSort()));
+        return actualQuery;
+    }
+
+    private long normalizePageNum(Long pageNum) {
+        return pageNum == null || pageNum <= 0 ? 1L : pageNum;
+    }
+
+    private long normalizePageSize(Long pageSize) {
+        if (pageSize == null || pageSize <= 0) {
+            return 20L;
+        }
+        return Math.min(pageSize, MAX_PAGE_SIZE);
+    }
+
+    private void validateSpuSaveDTO(SpuSaveDTO dto, boolean requireId) {
+        if (dto == null) {
+            throw new BizException(ResultCode.PARAM_MISSING, "商品信息不能为空");
+        }
+        if (requireId && dto.getId() == null) {
+            throw new BizException(ResultCode.PARAM_MISSING, "缺少 SPU ID");
+        }
+        if (StrUtil.isBlank(dto.getName())) {
+            throw new BizException(ResultCode.PARAM_MISSING, "商品名不能为空");
+        }
+        if (dto.getCategoryId() == null) {
+            throw new BizException(ResultCode.PARAM_MISSING, "分类不能为空");
+        }
+        if (categoryMapper.selectById(dto.getCategoryId()) == null) {
+            throw new BizException(ResultCode.DATA_NOT_FOUND, "分类不存在");
+        }
+        if (dto.getBrandId() != null && brandMapper.selectById(dto.getBrandId()) == null) {
+            throw new BizException(ResultCode.DATA_NOT_FOUND, "品牌不存在");
+        }
+        if (CollUtil.isEmpty(dto.getSkus())) {
+            throw new BizException(ResultCode.PARAM_MISSING, "至少需要一个 SKU");
+        }
+        for (SkuDTO sku : dto.getSkus()) {
+            validateSkuDTO(sku);
+        }
+    }
+
+    private void validateSkuDTO(SkuDTO sku) {
+        if (sku == null) {
+            throw new BizException(ResultCode.PARAM_MISSING, "SKU 信息不能为空");
+        }
+        if (sku.getPrice() == null) {
+            throw new BizException(ResultCode.PARAM_MISSING, "SKU 售价不能为空");
+        }
+        if (sku.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(ResultCode.PARAM_ERROR, "SKU 售价必须大于 0");
+        }
+        if (sku.getStock() == null) {
+            throw new BizException(ResultCode.PARAM_MISSING, "SKU 库存不能为空");
+        }
+        if (sku.getStock() < 0) {
+            throw new BizException(ResultCode.PARAM_ERROR, "SKU 库存不能为负");
+        }
+    }
+
+    private PmsSku buildSku(SkuDTO dto) {
+        PmsSku sku = new PmsSku();
+        BeanUtil.copyProperties(dto, sku, "specData");
+        sku.setId(null);
+        sku.setName(StrUtil.trim(dto.getName()));
+        sku.setSkuCode(StrUtil.trim(dto.getSkuCode()));
+        sku.setSpecData(dto.getSpecData() == null ? null : JSON.toJSONString(dto.getSpecData()));
+        return sku;
     }
 }
