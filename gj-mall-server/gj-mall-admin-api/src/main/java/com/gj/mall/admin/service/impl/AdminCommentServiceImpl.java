@@ -48,6 +48,7 @@ public class AdminCommentServiceImpl implements AdminCommentService {
     private static final int STATUS_APPROVED = 1;
     private static final int STATUS_REJECTED = 2;
     private static final int STATUS_HIDDEN = 3;
+    private static final long MAX_PAGE_SIZE = 100L;
 
     private final PmsProductCommentMapper commentMapper;
     private final UmsUserMapper userMapper;
@@ -59,9 +60,10 @@ public class AdminCommentServiceImpl implements AdminCommentService {
 
     @Override
     public PageResult<AdminCommentVO> page(AdminCommentQueryDTO query) {
-        long pageNum = normalizePageNum(query.getPageNum());
-        long pageSize = normalizePageSize(query.getPageSize());
-        String keyword = StrUtil.trim(query.getKeyword());
+        AdminCommentQueryDTO actualQuery = normalizeQuery(query);
+        long pageNum = normalizePageNum(actualQuery.getPageNum());
+        long pageSize = normalizePageSize(actualQuery.getPageSize());
+        String keyword = actualQuery.getKeyword();
         List<Long> matchedUserIds = Collections.emptyList();
         List<Long> matchedSpuIds = Collections.emptyList();
         List<Long> matchedSkuIds = Collections.emptyList();
@@ -77,17 +79,17 @@ public class AdminCommentServiceImpl implements AdminCommentService {
         IPage<PmsProductComment> result = commentMapper.selectPage(
                 new Page<>(pageNum, pageSize),
                 Wrappers.<PmsProductComment>lambdaQuery()
-                        .eq(query.getUserId() != null, PmsProductComment::getUserId, query.getUserId())
-                        .eq(query.getSpuId() != null, PmsProductComment::getSpuId, query.getSpuId())
-                        .eq(query.getSkuId() != null, PmsProductComment::getSkuId, query.getSkuId())
-                        .eq(query.getScore() != null, PmsProductComment::getScore, query.getScore())
-                        .eq(query.getStatus() != null, PmsProductComment::getStatus, query.getStatus())
-                        .and(Boolean.TRUE.equals(query.getHasImage()),
+                        .eq(actualQuery.getUserId() != null, PmsProductComment::getUserId, actualQuery.getUserId())
+                        .eq(actualQuery.getSpuId() != null, PmsProductComment::getSpuId, actualQuery.getSpuId())
+                        .eq(actualQuery.getSkuId() != null, PmsProductComment::getSkuId, actualQuery.getSkuId())
+                        .eq(actualQuery.getScore() != null, PmsProductComment::getScore, actualQuery.getScore())
+                        .eq(actualQuery.getStatus() != null, PmsProductComment::getStatus, actualQuery.getStatus())
+                        .and(Boolean.TRUE.equals(actualQuery.getHasImage()),
                                 w -> w.isNotNull(PmsProductComment::getImages).ne(PmsProductComment::getImages, "[]"))
-                        .and(Boolean.FALSE.equals(query.getHasImage()),
+                        .and(Boolean.FALSE.equals(actualQuery.getHasImage()),
                                 w -> w.isNull(PmsProductComment::getImages).or().eq(PmsProductComment::getImages, "[]"))
-                        .isNotNull(Boolean.TRUE.equals(query.getHasReply()), PmsProductComment::getReplyContent)
-                        .isNull(Boolean.FALSE.equals(query.getHasReply()), PmsProductComment::getReplyContent)
+                        .isNotNull(Boolean.TRUE.equals(actualQuery.getHasReply()), PmsProductComment::getReplyContent)
+                        .isNull(Boolean.FALSE.equals(actualQuery.getHasReply()), PmsProductComment::getReplyContent)
                         .and(StrUtil.isNotBlank(keyword), w -> {
                             w.like(PmsProductComment::getContent, keyword)
                                     .or()
@@ -306,6 +308,15 @@ public class AdminCommentServiceImpl implements AdminCommentService {
     }
 
     private long normalizePageSize(Long pageSize) {
-        return pageSize == null || pageSize <= 0 ? 10 : pageSize;
+        if (pageSize == null || pageSize <= 0) {
+            return 10;
+        }
+        return Math.min(pageSize, MAX_PAGE_SIZE);
+    }
+
+    private AdminCommentQueryDTO normalizeQuery(AdminCommentQueryDTO query) {
+        AdminCommentQueryDTO actualQuery = query == null ? new AdminCommentQueryDTO() : query;
+        actualQuery.setKeyword(StrUtil.trim(actualQuery.getKeyword()));
+        return actualQuery;
     }
 }

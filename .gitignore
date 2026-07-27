@@ -34,5 +34,6 @@ Thumbs.db
 .codex-tmp/
 .codex-run/
 .codex-tools/
+.worktrees/
 tmp/
 temp/

@@ -129,11 +129,13 @@ public class AdminReportServiceImpl implements AdminReportService {
             LocalDate bucket = date.isBefore(range.start) ? range.start : date;
             AdminSalesReportVO.TrendItem trend = trendMap.getOrDefault(bucket, new AdminSalesReportVO.TrendItem());
             trend.setDate(bucket);
-            report.getSalesTrend().add(trend);
 
             AdminSalesReportVO.RefundTrendItem refund = refundMap.getOrDefault(bucket, new AdminSalesReportVO.RefundTrendItem());
             refund.setDate(bucket);
             report.getRefundTrend().add(refund);
+
+            trend.setNetAmount(safeAmount(trend.getPaidAmount()).subtract(safeAmount(refund.getRefundAmount())));
+            report.getSalesTrend().add(trend);
 
             AdminSalesReportVO.MemberGrowthItem member = memberMap.getOrDefault(bucket, new AdminSalesReportVO.MemberGrowthItem());
             member.setDate(bucket);

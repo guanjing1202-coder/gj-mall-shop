@@ -1,4 +1,4 @@
-package com.gj.mall.product.service.impl;
+package com.gj.mall.search.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -10,9 +10,9 @@ import com.gj.mall.product.mapper.PmsBrandMapper;
 import com.gj.mall.product.mapper.PmsCategoryMapper;
 import com.gj.mall.product.mapper.PmsSkuMapper;
 import com.gj.mall.product.mapper.PmsSpuMapper;
-import com.gj.mall.product.service.ProductSearchService;
-import com.gj.mall.product.vo.SearchHotWordVO;
-import com.gj.mall.product.vo.SearchSuggestVO;
+import com.gj.mall.search.service.ProductSearchService;
+import com.gj.mall.search.vo.SearchHotWordVO;
+import com.gj.mall.search.vo.SearchSuggestVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -97,11 +97,11 @@ public class ProductSearchServiceImpl implements ProductSearchService {
 
         List<SearchSuggestVO> result = new ArrayList<>();
         LinkedHashSet<String> seen = new LinkedHashSet<>();
-        addSynonymSuggestions(result, seen, term, size);
         addCategorySuggestions(result, seen, term, size);
         addBrandSuggestions(result, seen, term, size);
         addProductSuggestions(result, seen, term, size);
         addSkuSuggestions(result, seen, term, size);
+        addSynonymSuggestions(result, seen, term, size);
 
         return result.size() > size ? result.subList(0, size) : result;
     }

@@ -1,7 +1,7 @@
-package com.gj.mall.product.service;
+package com.gj.mall.search.service;
 
-import com.gj.mall.product.vo.SearchHotWordVO;
-import com.gj.mall.product.vo.SearchSuggestVO;
+import com.gj.mall.search.vo.SearchHotWordVO;
+import com.gj.mall.search.vo.SearchSuggestVO;
 
 import java.util.List;
 

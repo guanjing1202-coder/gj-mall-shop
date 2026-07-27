@@ -237,14 +237,46 @@ public class CartServiceImpl implements CartService {
         String k = key(userId);
         Map<String, String> raw = hash().entries(k);
         if (CollUtil.isEmpty(raw)) return;
+        Set<Long> selectableSkuIds = selected ? findSelectableSkuIds(raw.values()) : Collections.emptySet();
         Map<String, String> upd = new HashMap<>(raw.size());
         for (Map.Entry<String, String> e : raw.entrySet()) {
             CartLine line = JSON.parseObject(e.getValue(), CartLine.class);
             if (line == null) continue;
-            line.selected = selected ? 1 : 0;
+            line.selected = selected && selectableSkuIds.contains(line.skuId) ? 1 : 0;
             upd.put(e.getKey(), JSON.toJSONString(line));
         }
         if (!upd.isEmpty()) hash().putAll(k, upd);
+    }
+
+    private Set<Long> findSelectableSkuIds(Collection<String> rawLines) {
+        List<CartLine> lines = rawLines.stream()
+                .map(s -> JSON.parseObject(s, CartLine.class))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        if (lines.isEmpty()) return Collections.emptySet();
+
+        List<Long> skuIds = lines.stream().map(l -> l.skuId).collect(Collectors.toList());
+        List<PmsSku> skus = skuService.listByIds(skuIds);
+        if (CollUtil.isEmpty(skus)) return Collections.emptySet();
+
+        Map<Long, PmsSku> skuMap = skus.stream().collect(Collectors.toMap(PmsSku::getId, s -> s));
+        Set<Long> spuIds = skus.stream().map(PmsSku::getSpuId).collect(Collectors.toSet());
+        Map<Long, PmsSpu> spuMap = spuIds.isEmpty() ? Collections.emptyMap()
+                : spuMapper.selectBatchIds(spuIds).stream()
+                .collect(Collectors.toMap(PmsSpu::getId, s -> s));
+
+        Set<Long> selectable = new HashSet<>();
+        for (CartLine line : lines) {
+            PmsSku sku = skuMap.get(line.skuId);
+            if (sku == null) continue;
+            PmsSpu spu = spuMap.get(sku.getSpuId());
+            int quantity = line.quantity == null ? 0 : line.quantity;
+            int stock = sku.getStock() == null ? 0 : sku.getStock();
+            if (spu != null && Integer.valueOf(1).equals(spu.getPublishStatus()) && quantity > 0 && stock >= quantity) {
+                selectable.add(line.skuId);
+            }
+        }
+        return selectable;
     }
 
     @Override

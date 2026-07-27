@@ -125,6 +125,67 @@ class AdminAfterSaleServiceImplTest {
     }
 
     @Test
+    void refundRetriesExistingFailedRefundRecord() {
+        OmsAfterSaleMapper afterSaleMapper = mock(OmsAfterSaleMapper.class);
+        OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);
+        OmsOrderItemMapper orderItemMapper = mock(OmsOrderItemMapper.class);
+        PayPaymentRecordMapper paymentRecordMapper = mock(PayPaymentRecordMapper.class);
+        PayRefundRecordMapper refundRecordMapper = mock(PayRefundRecordMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        UserMessageService messageService = mock(UserMessageService.class);
+        AfterSaleRuleService ruleService = mock(AfterSaleRuleService.class);
+        AdminAfterSaleServiceImpl service = new AdminAfterSaleServiceImpl(
+                afterSaleMapper,
+                orderMapper,
+                orderItemMapper,
+                paymentRecordMapper,
+                refundRecordMapper,
+                userMapper,
+                messageService,
+                ruleService);
+
+        OmsAfterSale afterSale = waitRefundAfterSale();
+        OmsOrder order = paidOrder();
+        PayPaymentRecord payment = paidPayment();
+        PayRefundRecord failedRefund = new PayRefundRecord();
+        failedRefund.setId(901L);
+        failedRefund.setRefundNo("RF202605200001");
+        failedRefund.setAfterSaleId(afterSale.getId());
+        failedRefund.setAfterSaleNo(afterSale.getAfterSaleNo());
+        failedRefund.setPaymentId(payment.getId());
+        failedRefund.setAmount(afterSale.getAmount());
+        failedRefund.setStatus(2);
+        failedRefund.setReason("渠道退款失败");
+        failedRefund.setCallbackData("refund failed");
+
+        when(afterSaleMapper.selectById(100L)).thenReturn(afterSale);
+        when(refundRecordMapper.selectOne(any(Wrapper.class))).thenReturn(failedRefund);
+        when(orderMapper.selectById(afterSale.getOrderId())).thenReturn(order);
+        when(paymentRecordMapper.selectOne(any(Wrapper.class))).thenReturn(payment);
+
+        AdminAfterSaleActionDTO dto = new AdminAfterSaleActionDTO();
+        dto.setAuditRemark("重新退款成功");
+
+        service.refund(100L, dto);
+
+        verify(refundRecordMapper, never()).insert(any(PayRefundRecord.class));
+        verify(refundRecordMapper).updateById(argThat(update ->
+                failedRefund.getId().equals(update.getId())
+                        && Integer.valueOf(1).equals(update.getStatus())
+                        && "重新退款成功".equals(update.getReason())
+                        && update.getCallbackData().contains("admin-retry-refund success")
+                        && update.getSuccessTime() != null));
+        verify(paymentRecordMapper).updateById(argThat(update ->
+                payment.getId().equals(update.getId()) && Integer.valueOf(3).equals(update.getStatus())));
+        verify(afterSaleMapper).updateById(argThat(update ->
+                afterSale.getId().equals(update.getId())
+                        && Integer.valueOf(4).equals(update.getStatus())
+                        && failedRefund.getId().equals(update.getRefundPaymentId())));
+        verify(orderMapper).updateById(argThat(update ->
+                order.getId().equals(update.getId()) && Integer.valueOf(6).equals(update.getStatus())));
+    }
+
+    @Test
     void detailIncludesRefundRecord() {
         OmsAfterSaleMapper afterSaleMapper = mock(OmsAfterSaleMapper.class);
         OmsOrderMapper orderMapper = mock(OmsOrderMapper.class);

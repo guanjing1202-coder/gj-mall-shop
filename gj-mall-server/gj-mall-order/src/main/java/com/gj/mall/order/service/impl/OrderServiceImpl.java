@@ -36,6 +36,7 @@ import com.gj.mall.order.vo.ReceiverVO;
 import com.gj.mall.order.vo.AdminOrderFulfillmentSummaryVO;
 import com.gj.mall.marketing.entity.SmsSeckillSku;
 import com.gj.mall.marketing.service.CouponService;
+import com.gj.mall.marketing.service.impl.SeckillServiceImpl;
 import com.gj.mall.marketing.vo.CouponCheckResult;
 import com.gj.mall.product.entity.PmsSku;
 import com.gj.mall.product.entity.PmsSpu;
@@ -70,6 +71,7 @@ public class OrderServiceImpl implements OrderService {
     private final PmsSpuMapper spuMapper;
     private final UserMessageService messageService;
     private final FreightService freightService;
+    private final SeckillServiceImpl seckillService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -89,18 +91,16 @@ public class OrderServiceImpl implements OrderService {
         BeanUtil.copyProperties(addr, receiver);
 
         // 3. 预扣库存（行级原子 update）
-        List<Long> lockedSkuIds = new ArrayList<>();
+        Map<Long, Integer> lockedQtyMap = new LinkedHashMap<>();
         for (CartItemVO item : selected) {
             boolean ok = skuService.lockStock(item.getSkuId(), item.getQuantity());
             if (!ok) {
                 // 回滚已扣的
-                for (Long sid : lockedSkuIds) {
-                    skuService.releaseStock(sid, findQty(selected, sid));
-                }
+                lockedQtyMap.forEach(skuService::releaseStock);
                 throw new BizException(ResultCode.STOCK_NOT_ENOUGH,
                         "SKU=" + item.getSkuId() + " 库存不足");
             }
-            lockedSkuIds.add(item.getSkuId());
+            lockedQtyMap.merge(item.getSkuId(), item.getQuantity(), Integer::sum);
         }
 
         // 4. 计算金额 + 优惠券
@@ -193,15 +193,24 @@ public class OrderServiceImpl implements OrderService {
         if (CollUtil.isEmpty(normalized)) {
             throw new BizException(ResultCode.ORDER_EMPTY_ITEMS);
         }
-        return normalized.stream().map(this::toDirectCartItem).collect(Collectors.toList());
+        Map<Long, Integer> qtyBySku = new LinkedHashMap<>();
+        for (CreateOrderItemDTO item : normalized) {
+            int quantity = item.getQuantity() == null ? 1 : item.getQuantity();
+            if (quantity <= 0) {
+                throw new BizException(ResultCode.PARAM_ERROR, "购买数量必须大于 0");
+            }
+            qtyBySku.merge(item.getSkuId(), quantity, Integer::sum);
+        }
+        return qtyBySku.entrySet().stream()
+                .map(e -> toDirectCartItem(e.getKey(), e.getValue()))
+                .collect(Collectors.toList());
     }
 
-    private CartItemVO toDirectCartItem(CreateOrderItemDTO item) {
-        int quantity = item.getQuantity() == null ? 1 : item.getQuantity();
+    private CartItemVO toDirectCartItem(Long skuId, int quantity) {
         if (quantity <= 0) {
             throw new BizException(ResultCode.PARAM_ERROR, "购买数量必须大于 0");
         }
-        PmsSku sku = skuService.getByIdOrThrow(item.getSkuId());
+        PmsSku sku = skuService.getByIdOrThrow(skuId);
         PmsSpu spu = spuMapper.selectById(sku.getSpuId());
         if (spu == null) {
             throw new BizException(ResultCode.PRODUCT_NOT_FOUND);
@@ -262,11 +271,6 @@ public class OrderServiceImpl implements OrderService {
         vo.setEmail(StrUtil.isBlank(dto.getEmail()) ? null : StrUtil.sub(StrUtil.trim(dto.getEmail()), 0, 100));
         vo.setContent(StrUtil.sub(StrUtil.blankToDefault(StrUtil.trim(dto.getContent()), "商品明细"), 0, 50));
         return vo;
-    }
-
-    private int findQty(List<CartItemVO> items, Long skuId) {
-        return items.stream().filter(i -> i.getSkuId().equals(skuId))
-                .findFirst().map(CartItemVO::getQuantity).orElse(0);
     }
 
     @Override
@@ -424,8 +428,8 @@ public class OrderServiceImpl implements OrderService {
         traces.add(new OrderLogisticsTraceVO(
                 "商家发货",
                 deliveryDescription(order),
-                order.getDeliveryTime(),
-                order.getDeliveryTime() != null && !canceled));
+                deliveryTraceTime(order),
+                deliveryTraceActive(order, canceled)));
         traces.add(new OrderLogisticsTraceVO(
                 "确认收货",
                 "商品已签收，交易完成",
@@ -459,6 +463,28 @@ public class OrderServiceImpl implements OrderService {
             desc.append("，").append(order.getDeliveryRemark());
         }
         return desc.toString();
+    }
+
+    private boolean deliveryTraceActive(OmsOrder order, boolean canceled) {
+        if (canceled) {
+            return false;
+        }
+        if (order.getDeliveryTime() != null) {
+            return true;
+        }
+        OrderStatus status = OrderStatus.of(order.getStatus());
+        return status == OrderStatus.PENDING_RECEIVE || status == OrderStatus.COMPLETED;
+    }
+
+    private LocalDateTime deliveryTraceTime(OmsOrder order) {
+        if (order.getDeliveryTime() != null) {
+            return order.getDeliveryTime();
+        }
+        OrderStatus status = OrderStatus.of(order.getStatus());
+        if (status == OrderStatus.COMPLETED) {
+            return order.getReceiveTime();
+        }
+        return null;
     }
 
     private String logisticsCurrentAction(OmsOrder order) {
@@ -543,6 +569,9 @@ public class OrderServiceImpl implements OrderService {
                 Wrappers.<OmsOrderItem>lambdaQuery().eq(OmsOrderItem::getOrderId, orderId));
         for (OmsOrderItem it : items) {
             skuService.consumeStock(it.getSkuId(), it.getQuantity());
+            if (it.getSeckillSkuId() != null) {
+                seckillService.onPaid(it.getSeckillSkuId(), it.getQuantity());
+            }
         }
         // 核销优惠券
         if (order.getCouponUserId() != null) {
@@ -680,6 +709,7 @@ public class OrderServiceImpl implements OrderService {
         item.setOrderNo(orderNo);
         item.setSpuId(seckillSku.getSpuId());
         item.setSkuId(seckillSku.getSkuId());
+        item.setSeckillSkuId(seckillSku.getId());
         item.setSkuName(sku.getName());
         item.setSkuImage(sku.getImage());
         if (sku.getSpecData() != null) item.setSpecData(sku.getSpecData());

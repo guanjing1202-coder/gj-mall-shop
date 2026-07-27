@@ -415,8 +415,8 @@ class AdminPaymentServiceImplTest {
 
         assertFalse(access.getReady());
         assertTrue(access.getReadinessTips().contains("请替换默认开发回调密钥 mall.pay.callback.secret"));
-        assertEquals("商户配置已填写，私钥文件可读取，等待 SDK 接入", access.getChannels().get(1).getStatus());
-        assertEquals("应用配置已填写，等待 SDK 接入", access.getChannels().get(2).getStatus());
+        assertEquals("可用", access.getChannels().get(1).getStatus());
+        assertEquals("可用", access.getChannels().get(2).getStatus());
     }
 
     @Test
@@ -602,7 +602,8 @@ class AdminPaymentServiceImplTest {
 
         assertTrue(access.getReady());
         assertEquals("真实支付配置已就绪", access.getReadinessText());
-        assertEquals("商户配置已填写，私钥文件可读取，等待 SDK 接入", access.getChannels().get(1).getStatus());
+        assertEquals("可用", access.getChannels().get(1).getStatus());
+        assertEquals("可用", access.getChannels().get(2).getStatus());
     }
 
     @Test

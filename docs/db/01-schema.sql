@@ -278,6 +278,7 @@ CREATE TABLE oms_order_item (
     order_no        VARCHAR(32)     NOT NULL,
     spu_id          BIGINT          NOT NULL,
     sku_id          BIGINT          NOT NULL,
+    seckill_sku_id  BIGINT          DEFAULT NULL            COMMENT '秒杀活动SKU ID',
     sku_name        VARCHAR(255)    NOT NULL,
     sku_image       VARCHAR(500)    DEFAULT NULL,
     spec_data       JSON            DEFAULT NULL,
@@ -286,7 +287,8 @@ CREATE TABLE oms_order_item (
     total_amount    DECIMAL(10,2)   NOT NULL,
     create_time     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    KEY idx_order (order_id)
+    KEY idx_order (order_id),
+    KEY idx_seckill_sku (seckill_sku_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单项';
 
 DROP TABLE IF EXISTS oms_delivery_company;

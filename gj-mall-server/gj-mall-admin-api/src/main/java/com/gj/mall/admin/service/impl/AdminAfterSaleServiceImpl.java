@@ -244,7 +244,7 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         PayRefundRecord existingRefund = refundRecordMapper.selectOne(Wrappers.<PayRefundRecord>lambdaQuery()
                 .eq(PayRefundRecord::getAfterSaleId, afterSale.getId())
                 .last("LIMIT 1"));
-        if (existingRefund != null) {
+        if (existingRefund != null && !Integer.valueOf(2).equals(existingRefund.getStatus())) {
             throw new BizException(ResultCode.DATA_EXISTS, "退款记录已存在，请勿重复退款");
         }
         OmsOrder order = getOrderOrThrow(afterSale.getOrderId());
@@ -263,26 +263,12 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
         String remark = dto == null ? null : StrUtil.trim(dto.getAuditRemark());
         LocalDateTime now = LocalDateTime.now();
 
-        PayRefundRecord refundRecord = new PayRefundRecord();
-        refundRecord.setRefundNo(genRefundNo(afterSale.getUserId()));
-        refundRecord.setPaymentId(record.getId());
-        refundRecord.setPayNo(record.getPayNo());
-        refundRecord.setThirdPayNo(record.getThirdPayNo());
-        refundRecord.setAfterSaleId(afterSale.getId());
-        refundRecord.setAfterSaleNo(afterSale.getAfterSaleNo());
-        refundRecord.setOrderId(order.getId());
-        refundRecord.setOrderNo(order.getOrderNo());
-        refundRecord.setUserId(afterSale.getUserId());
-        refundRecord.setChannel(record.getChannel());
-        refundRecord.setAmount(afterSale.getAmount());
-        refundRecord.setStatus(1);
-        refundRecord.setReason(StrUtil.blankToDefault(remark, "售后退款"));
-        refundRecord.setOperatorType("admin_after_sale");
-        refundRecord.setCallbackData("after-sale-refund afterSaleNo=" + afterSale.getAfterSaleNo()
-                + " paymentId=" + record.getId()
-                + " amount=" + afterSale.getAmount());
-        refundRecord.setSuccessTime(now);
-        refundRecordMapper.insert(refundRecord);
+        PayRefundRecord refundRecord = buildRefundRecord(existingRefund, afterSale, order, record, remark, now);
+        if (existingRefund == null) {
+            refundRecordMapper.insert(refundRecord);
+        } else {
+            refundRecordMapper.updateById(refundRecord);
+        }
 
         PayPaymentRecord paymentUpdate = new PayPaymentRecord();
         paymentUpdate.setId(record.getId());
@@ -470,6 +456,48 @@ public class AdminAfterSaleServiceImpl implements AdminAfterSaleService {
             return;
         }
         updateOrderStatus(afterSale.getOrderId(), afterSale.getOrderStatusSnapshot());
+    }
+
+    private PayRefundRecord buildRefundRecord(PayRefundRecord existingRefund,
+                                              OmsAfterSale afterSale,
+                                              OmsOrder order,
+                                              PayPaymentRecord payment,
+                                              String remark,
+                                              LocalDateTime now) {
+        boolean retry = existingRefund != null;
+        PayRefundRecord refundRecord = new PayRefundRecord();
+        if (retry) {
+            refundRecord.setId(existingRefund.getId());
+            refundRecord.setRefundNo(existingRefund.getRefundNo());
+        } else {
+            refundRecord.setRefundNo(genRefundNo(afterSale.getUserId()));
+        }
+        refundRecord.setPaymentId(payment.getId());
+        refundRecord.setPayNo(payment.getPayNo());
+        refundRecord.setThirdPayNo(payment.getThirdPayNo());
+        refundRecord.setAfterSaleId(afterSale.getId());
+        refundRecord.setAfterSaleNo(afterSale.getAfterSaleNo());
+        refundRecord.setOrderId(order.getId());
+        refundRecord.setOrderNo(order.getOrderNo());
+        refundRecord.setUserId(afterSale.getUserId());
+        refundRecord.setChannel(payment.getChannel());
+        refundRecord.setAmount(afterSale.getAmount());
+        refundRecord.setStatus(1);
+        refundRecord.setReason(StrUtil.blankToDefault(remark, "售后退款"));
+        refundRecord.setOperatorType("admin_after_sale");
+        String callback = "after-sale-refund afterSaleNo=" + afterSale.getAfterSaleNo()
+                + " paymentId=" + payment.getId()
+                + " amount=" + afterSale.getAmount();
+        if (retry) {
+            callback = appendCallback(existingRefund.getCallbackData(), "admin-retry-refund success paymentId="
+                    + payment.getId()
+                    + " amount=" + afterSale.getAmount()
+                    + " refundNo=" + existingRefund.getRefundNo()
+                    + " remark=" + StrUtil.blankToDefault(remark, "-"));
+        }
+        refundRecord.setCallbackData(callback);
+        refundRecord.setSuccessTime(now);
+        return refundRecord;
     }
 
     private List<AdminAfterSaleVO> enrich(List<OmsAfterSale> afterSales) {

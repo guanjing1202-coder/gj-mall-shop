@@ -135,7 +135,42 @@ class AdminReportServiceImplTest {
 
         assertFalse(csv.contains("2026-05-02,1,1,88.00"));
         assertFalse(csv.contains("2026-05-18,2,2,120.00"));
-        assertEquals(1, countOccurrences(csv, "2026-05-01,3,3,208.00,198.00,0.00,0"));
+        assertEquals(1, countOccurrences(csv, "2026-05-01,3,3,208.00,208.00,0.00,0"));
+    }
+
+    @Test
+    void salesReportTrendNetAmountSubtractsRefundAmountForSameBucket() {
+        AdminReportQueryDTO query = query("2026-05-01", "2026-05-02", "day");
+        when(reportMapper.selectSalesTrend(any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(mutableList(
+                        trend("2026-05-01", 2L, 2L, "200.00", "200.00"),
+                        trend("2026-05-02", 1L, 1L, "80.00", "80.00")));
+        when(reportMapper.selectRefundTrend(any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(mutableList(refund("2026-05-01", 1L, "50.00")));
+        when(reportMapper.selectMemberGrowth(any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(mutableList());
+
+        AdminSalesReportVO report = service.salesReport(query);
+
+        assertEquals(new BigDecimal("150.00"), report.getSalesTrend().get(0).getNetAmount());
+        assertEquals(new BigDecimal("80.00"), report.getSalesTrend().get(1).getNetAmount());
+    }
+
+    @Test
+    void exportSalesReportCsvUsesRefundAdjustedNetAmountAfterAggregation() {
+        AdminReportQueryDTO query = query("2026-05-01", "2026-05-31", "month");
+        when(reportMapper.selectSalesTrend(any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(mutableList(
+                        trend("2026-05-02", 1L, 1L, "88.00", "88.00"),
+                        trend("2026-05-18", 2L, 2L, "120.00", "120.00")));
+        when(reportMapper.selectRefundTrend(any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(mutableList(refund("2026-05-20", 1L, "30.00")));
+        when(reportMapper.selectMemberGrowth(any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(mutableList());
+
+        String csv = service.exportSalesReportCsv(query);
+
+        assertEquals(1, countOccurrences(csv, "2026-05-01,3,3,208.00,178.00,30.00,0"));
     }
 
     private AdminReportQueryDTO query(String startDate, String endDate, String granularity) {
