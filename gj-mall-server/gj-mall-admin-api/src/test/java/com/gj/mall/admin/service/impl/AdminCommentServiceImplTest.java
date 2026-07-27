@@ -1,10 +1,14 @@
 package com.gj.mall.admin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.gj.mall.admin.dto.AdminCommentActionDTO;
+import com.gj.mall.admin.dto.AdminCommentQueryDTO;
 import com.gj.mall.admin.dto.AdminCommentReplyDTO;
 import com.gj.mall.admin.vo.AdminCommentVO;
 import com.gj.mall.common.exception.BizException;
+import com.gj.mall.common.result.PageResult;
 import com.gj.mall.order.entity.OmsOrderItem;
 import com.gj.mall.order.mapper.OmsOrderItemMapper;
 import com.gj.mall.product.entity.PmsBrand;
@@ -111,6 +115,52 @@ class AdminCommentServiceImplTest {
         assertThatThrownBy(() -> service.detail(10L))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("评价不存在");
+    }
+
+    @Test
+    void pageUsesDefaultsWhenQueryIsNull() {
+        PmsProductCommentMapper commentMapper = mock(PmsProductCommentMapper.class);
+        AdminCommentServiceImpl service = service(commentMapper);
+        Page<PmsProductComment> page = new Page<>(1, 10, 0);
+        page.setRecords(Collections.emptyList());
+        when(commentMapper.selectPage(any(IPage.class), any(Wrapper.class))).thenReturn(page);
+
+        PageResult<AdminCommentVO> result = service.page(null);
+
+        ArgumentCaptor<IPage> pageCaptor = ArgumentCaptor.forClass(IPage.class);
+        verify(commentMapper).selectPage(pageCaptor.capture(), any(Wrapper.class));
+        assertThat(pageCaptor.getValue().getCurrent()).isEqualTo(1L);
+        assertThat(pageCaptor.getValue().getSize()).isEqualTo(10L);
+        assertThat(result.getPageNum()).isEqualTo(1L);
+        assertThat(result.getPageSize()).isEqualTo(10L);
+    }
+
+    @Test
+    void pageNormalizesPageBoundsAndKeyword() {
+        PmsProductCommentMapper commentMapper = mock(PmsProductCommentMapper.class);
+        UmsUserMapper userMapper = mock(UmsUserMapper.class);
+        PmsSpuMapper spuMapper = mock(PmsSpuMapper.class);
+        PmsSkuMapper skuMapper = mock(PmsSkuMapper.class);
+        AdminCommentServiceImpl service = new AdminCommentServiceImpl(commentMapper, userMapper, spuMapper, skuMapper,
+                mock(PmsBrandMapper.class), mock(PmsCategoryMapper.class), mock(OmsOrderItemMapper.class));
+        Page<PmsProductComment> page = new Page<>(1, 100, 0);
+        page.setRecords(Collections.emptyList());
+        when(commentMapper.selectPage(any(IPage.class), any(Wrapper.class))).thenReturn(page);
+        when(userMapper.selectList(any(Wrapper.class))).thenReturn(Collections.emptyList());
+        when(spuMapper.selectList(any(Wrapper.class))).thenReturn(Collections.emptyList());
+        when(skuMapper.selectList(any(Wrapper.class))).thenReturn(Collections.emptyList());
+        AdminCommentQueryDTO query = new AdminCommentQueryDTO();
+        query.setPageNum(-1L);
+        query.setPageSize(500L);
+        query.setKeyword("  iPhone  ");
+
+        service.page(query);
+
+        ArgumentCaptor<IPage> pageCaptor = ArgumentCaptor.forClass(IPage.class);
+        verify(commentMapper).selectPage(pageCaptor.capture(), any(Wrapper.class));
+        assertThat(pageCaptor.getValue().getCurrent()).isEqualTo(1L);
+        assertThat(pageCaptor.getValue().getSize()).isEqualTo(100L);
+        assertThat(query.getKeyword()).isEqualTo("iPhone");
     }
 
     private AdminCommentServiceImpl service(PmsProductCommentMapper commentMapper) {

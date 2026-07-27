@@ -72,6 +72,22 @@ class ProductCommentServiceImplTest {
     }
 
     @Test
+    void pageKeepsTotalWhenRequestedPageHasNoRecords() {
+        PmsProductCommentMapper commentMapper = mock(PmsProductCommentMapper.class);
+        ProductCommentServiceImpl service = service(commentMapper, mock(PmsSkuMapper.class), spuMapperWithProduct());
+        Page<PmsProductComment> page = new Page<>(3, 10, 27);
+        page.setRecords(Collections.emptyList());
+        when(commentMapper.selectPage(any(IPage.class), any(Wrapper.class))).thenReturn(page);
+
+        PageResult<ProductCommentVO> result = service.page(100L, 3L, 10L, null);
+
+        assertThat(result.getTotal()).isEqualTo(27L);
+        assertThat(result.getPageNum()).isEqualTo(3L);
+        assertThat(result.getPageSize()).isEqualTo(10L);
+        assertThat(result.getList()).isEmpty();
+    }
+
+    @Test
     void pageRejectsMissingOrUnknownProduct() {
         ProductCommentServiceImpl service = service(mock(PmsProductCommentMapper.class), mock(PmsSkuMapper.class), mock(PmsSpuMapper.class));
 

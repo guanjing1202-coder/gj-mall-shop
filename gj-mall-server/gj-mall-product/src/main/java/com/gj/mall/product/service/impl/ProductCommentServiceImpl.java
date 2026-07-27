@@ -1,6 +1,5 @@
 package com.gj.mall.product.service.impl;
 
-import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -53,9 +52,6 @@ public class ProductCommentServiceImpl implements ProductCommentService {
                         .and(Boolean.FALSE.equals(hasImage),
                                 w -> w.isNull(PmsProductComment::getImages).or().eq(PmsProductComment::getImages, "[]"))
                         .orderByDesc(PmsProductComment::getCreateTime));
-        if (CollUtil.isEmpty(result.getRecords())) {
-            return PageResult.empty(result.getCurrent(), result.getSize());
-        }
         return new PageResult<>(
                 result.getTotal(),
                 result.getCurrent(),
